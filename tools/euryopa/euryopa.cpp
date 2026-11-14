@@ -2602,7 +2602,8 @@ updateFPS(void)
 }
 
 #ifdef RW_D3D9
-namespace rw { namespace d3d { bool32 deviceReady(void); } }
+namespace rw { namespace d3d { bool32 deviceReady(void); extern void (*deviceLog)(const char *msg); } }
+static void d3dLogSink(const char *msg) { log("%s", msg); }
 #endif
 
 void
@@ -2617,11 +2618,15 @@ Draw(void)
 	}
 
 #ifdef RW_D3D9
+	rw::d3d::deviceLog = d3dLogSink;
 	// SA-MP edition: while another fullscreen app (GTA) owns the display the
 	// D3D9 device is lost and its render targets are released - drawing now
 	// would touch freed resources. Skip the whole frame (UI, agent and all)
 	// until the device has been reset.
 	if(!rw::d3d::deviceReady()){
+		// keep answering non-render agent requests (list, session, place...)
+		// so a stuck device can't lock the agent out; captures stay queued
+		AgentBridgeUpdate();
 		Sleep(50);
 		return;
 	}
