@@ -556,6 +556,7 @@ bool SampBlockGameSave(const char *action);
 bool SampCanImport(const char *path);
 int SampImportFile(const char *path);
 bool SampSyncToServer(void);
+int SampLoadFromServer(void);
 void SampMenu(void);
 void SampPopups(void);
 void SampLoadDefinitions(void);

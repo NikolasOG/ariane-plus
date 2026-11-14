@@ -776,8 +776,82 @@ JoinPath(char *dst, size_t size, const char *a, const char *b)
 	snprintf(dst, size, "%s%s%s", a, slash ? "" : "/", b);
 }
 
+static bool gOpenConfirmEmptySync, gOpenConfirmReload;
+static int gPendingServerEntries;
+
+static void
+LiveFilePath(char *dst, size_t size)
+{
+	JoinPath(dst, size, gSampServerDir, "scriptfiles/ariane_live.txt");
+}
+
+// Number of object/removal lines in the server's live file, -1 if there is none.
+static int
+LiveFileEntries(void)
+{
+	char path[1200];
+	LiveFilePath(path, sizeof(path));
+	FILE *f = fopen(path, "r");
+	if(f == nil)
+		return -1;
+	char line[256];
+	int n = 0;
+	while(fgets(line, sizeof(line), f))
+		if((line[0] == 'O' || line[0] == 'R') && line[1] == ' ')
+			n++;
+	fclose(f);
+	return n;
+}
+
+static void ClearLayer(void);
+static int CountLayer(int *removed);
+
+// Rebuilds the SA-MP layer from what the server is currently running
+// (scriptfiles/ariane_live.txt, written by the last Sync).
+int
+SampLoadFromServer(void)
+{
+	LoadSettings();
+	if(gSampServerDir[0] == '\0'){
+		gOpenServer = true;
+		return -1;
+	}
+	char path[1200];
+	LiveFilePath(path, sizeof(path));
+	FILE *f = fopen(path, "r");
+	if(f == nil){
+		Toast(TOAST_SPAWN, "Nothing on the server yet (no %s)", path);
+		return -1;
+	}
+	ClearLayer();
+	ImportStats st = {};
+	char line[256];
+	while(fgets(line, sizeof(line), f)){
+		int model, world, interior;
+		float x, y, z, rx, ry, rz, radius;
+		if(line[0] == 'O' &&
+		   sscanf(line + 1, "%d %f %f %f %f %f %f %d %d", &model, &x, &y, &z, &rx, &ry, &rz, &world, &interior) == 9)
+			AddObject(&st, model, x, y, z, rx, ry, rz, world, interior);
+		else if(line[0] == 'R' &&
+		        sscanf(line + 1, "%d %f %f %f %f", &model, &x, &y, &z, &radius) == 5)
+			AddRemoval(&st, model, x, y, z, radius);
+	}
+	fclose(f);
+	log("SA-MP: loaded from server: %d objects (%d not drawable), %d removals\n", st.objects + st.raw, st.raw, st.removals);
+	Toast(TOAST_SPAWN, "Loaded the server's map: %d objects, %d removed buildings", st.objects + st.raw, st.removals);
+	return st.objects + st.raw + st.removals;
+}
+
+static bool DoSyncToServer(bool force);
+
 bool
 SampSyncToServer(void)
+{
+	return DoSyncToServer(false);
+}
+
+static bool
+DoSyncToServer(bool force)
 {
 	LoadSettings();
 	if(gSampServerDir[0] == '\0'){
@@ -787,8 +861,19 @@ SampSyncToServer(void)
 	ExportLists l;
 	CollectExport(&l);
 
+	// Syncing an empty layer over a populated server map would wipe it -
+	// almost always because Ariane was restarted and the map wasn't reloaded.
+	if(!force && l.objects.empty() && l.removals.empty()){
+		int onServer = LiveFileEntries();
+		if(onServer > 0){
+			gPendingServerEntries = onServer;
+			gOpenConfirmEmptySync = true;
+			return false;
+		}
+	}
+
 	char path[1200], tmp[1200];
-	JoinPath(path, sizeof(path), gSampServerDir, "scriptfiles/ariane_live.txt");
+	LiveFilePath(path, sizeof(path));
 	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
 	FILE *f = fopen(tmp, "w");
 	if(f == nil){
@@ -869,6 +954,17 @@ void
 SampMenu(void)
 {
 	LoadSettings();
+
+	// First frame: pick up what the server is already running, so a fresh
+	// Ariane doesn't start empty (and a sync doesn't wipe the server's map).
+	static bool autoLoaded = false;
+	if(!autoLoaded){
+		autoLoaded = true;
+		int r0 = 0;
+		if(gSampServerDir[0] && CountLayer(&r0) == 0 && r0 == 0 && LiveFileEntries() > 0)
+			SampLoadFromServer();
+	}
+
 	if(!ImGui::BeginMenu("SA-MP"))
 		return;
 	int removed = 0, objects = CountLayer(&removed);
@@ -898,6 +994,12 @@ SampMenu(void)
 #endif
 	if(ImGui::MenuItem("Export Pawn...")) gOpenExport = true;
 	if(ImGui::MenuItem("Sync to server", nil, false, true)) SampSyncToServer();
+	if(ImGui::MenuItem("Reload from server")){
+		if(objects > 0 || removed > 0) gOpenConfirmReload = true;
+		else SampLoadFromServer();
+	}
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("Replace the SA-MP layer with what the server is running now\n(scriptfiles/ariane_live.txt from the last sync).");
 	if(ImGui::MenuItem("Server folder...")) gOpenServer = true;
 	ImGui::Separator();
 	if(ImGui::MenuItem("Clear SA-MP layer")) ClearLayer();
@@ -909,6 +1011,39 @@ SampPopups(void)
 {
 	if(gOpenExport){ ImGui::OpenPopup("SA-MP export"); gOpenExport = false; }
 	if(gOpenServer){ ImGui::OpenPopup("SA-MP server"); gOpenServer = false; }
+	if(gOpenConfirmEmptySync){ ImGui::OpenPopup("Sync an empty layer?"); gOpenConfirmEmptySync = false; }
+	if(gOpenConfirmReload){ ImGui::OpenPopup("Reload from server?"); gOpenConfirmReload = false; }
+
+	if(ImGui::BeginPopupModal("Sync an empty layer?", nil, ImGuiWindowFlags_AlwaysAutoResize)){
+		ImGui::Text("Your SA-MP layer is empty, but the server is running %d objects/removals.", gPendingServerEntries);
+		ImGui::Text("Syncing now would wipe the server's map (and %s.inc).", gSampMapName);
+		ImGui::Spacing();
+		if(ImGui::Button("Load the server's map", ImVec2(200, 0))){
+			SampLoadFromServer();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Wipe it anyway", ImVec2(140, 0))){
+			DoSyncToServer(true);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Cancel", ImVec2(100, 0))) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	if(ImGui::BeginPopupModal("Reload from server?", nil, ImGuiWindowFlags_AlwaysAutoResize)){
+		ImGui::Text("Replace the current SA-MP layer with the server's map?");
+		ImGui::TextDisabled("Anything you haven't synced yet will be lost.");
+		ImGui::Spacing();
+		if(ImGui::Button("Reload", ImVec2(120, 0))){
+			SampLoadFromServer();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
 
 	if(ImGui::BeginPopupModal("SA-MP export", nil, ImGuiWindowFlags_AlwaysAutoResize)){
 		ImGui::InputText("Map name", gSampMapName, sizeof(gSampMapName));
