@@ -835,6 +835,8 @@ InitRW(void)
 }
 
 
+void InstallCrashLogger(void);
+
 sk::EventStatus
 AppEventHandler(sk::Event e, void *param)
 {
@@ -856,6 +858,7 @@ AppEventHandler(sk::Event e, void *param)
 		freopen("CONOUT$", "w", stdout);
 		freopen("CONOUT$", "w", stderr);
 */
+		InstallCrashLogger();	// SA-MP edition: crash-*.txt/.dmp next to the exe
 #if defined(_WIN32) && defined(RW_D3D9)
 		InitializeEditorWindowDpi();
 #endif
