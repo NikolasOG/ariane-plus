@@ -1290,11 +1290,14 @@ class ArianeService:
 			if candidate.get("schema") != CHECKPOINT_SCHEMA or candidate.get("layer_uuid") != layer_uuid:
 				raise ValueError("checkpoint verification failed")
 			os.replace(temporary, target)
-			directory_fd = os.open(self.checkpoint_dir, os.O_RDONLY)
-			try:
-				os.fsync(directory_fd)
-			finally:
-				os.close(directory_fd)
+			# Directory fsync is POSIX-only: Windows can't open a directory as a file
+			# (PermissionError), and NTFS already persists the rename.
+			if os.name != "nt":
+				directory_fd = os.open(self.checkpoint_dir, os.O_RDONLY)
+				try:
+					os.fsync(directory_fd)
+				finally:
+					os.close(directory_fd)
 		finally:
 			temporary.unlink(missing_ok=True)
 		return {"checkpoint": name, "path": str(target), "object_count": len(objects)}
