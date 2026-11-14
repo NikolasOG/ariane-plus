@@ -312,7 +312,7 @@ SampCreateInstance(int model, float x, float y, float z, float rx, float ry, flo
 	inst->m_imageIndex = -1;
 	inst->m_binInstIndex = -1;
 	inst->m_iplIndex = ++gSampIplCounter;
-	SetInstIplFilterKey(inst, "SA-MP layer");
+	SetInstIplFilterKey(inst, file->name);
 	inst->m_isAdded = true;
 	inst->m_isDirty = true;
 	inst->m_savedStateValid = false;

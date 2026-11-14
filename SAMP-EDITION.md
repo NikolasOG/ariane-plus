@@ -6,13 +6,16 @@ SA-MP / open.mp server without ever touching your game's IPL files.
 ## What changed
 - `tools/euryopa/samp.cpp` (new) — the whole feature: layer, import, export, live sync.
 - `euryopa.h` — declarations.
-- `objectinst.cpp` — in SA-MP mode, new/pasted/prefab objects go into the SA-MP layer.
+- `objectinst.cpp` — in SA-MP mode, new/pasted/prefab objects go into the SA-MP layer
+  (`GetOrCreateCurrentPlacementIplFile`).
 - `gui.cpp` — **SA-MP** menu; Save / Hot Reload blocked while SA-MP mode protects game
   files; dropping `.pwn/.inc/.txt/.map` on the window imports it.
-- `fileloader.cpp` — the SA-MP layer is never written as a game IPL; SA-MP IDE/IMG loading hook.
+- `fileloader.cpp` — the SA-MP layer is never written as a game IPL, streamed (binary) IPL
+  saves are skipped in SA-MP mode; SA-MP IDE/IMG loading hook.
 - `main.cpp`, `telemetry.cpp` — no upstream auto-update, telemetry opt-in, `ARIANE_GAME_DIR`.
-- librw (`skeleton/`) — `FILEDROP` event + `WM_DROPFILES` (stock Ariane expects it, upstream
-  librw doesn't have it).
+- Built on [Dryxio/ariane](https://github.com/Dryxio/ariane) `master` with the librw it pins
+  ([Southland-FR/librw](https://github.com/Southland-FR/librw), `ariane` branch, commit
+  `4456bb0`, see `.github/workflows/build-euryopa.yml`). No librw changes needed.
 
 ## Using it
 **SA-MP** menu in the top bar:
@@ -42,7 +45,7 @@ browser and can be placed like stock models. The SA-MP menu shows whether they l
 
 ## Other fork changes
 - **No auto-update** - upstream's updater would replace this fork with a stock build.
-- **Telemetry off by default** (opt in under Help > Privacy & Telemetry).
+- **Telemetry off** (upstream no longer has a toggle in the UI, so it simply stays off).
 - **`ARIANE_GAME_DIR`** - run the editor from anywhere against a game folder
   (`run_ariane_samp.bat` sets it). Settings stay next to `ariane.exe`.
 
