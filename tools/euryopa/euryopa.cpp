@@ -797,7 +797,8 @@ IntersectRayTriangle(const Ray &ray, rw::V3d a, rw::V3d b, rw::V3d c, float *t)
 }
 
 static bool
-IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hitPos, rw::V3d *hitNormal)
+IntersectRayColModelFull(const Ray &worldRay, ObjectInst *inst, const rw::Matrix *preInv,
+	rw::V3d *hitPos, rw::V3d *hitNormal, int *hitSurface)
 {
 	ObjectDef *obj = GetObjectDef(inst->m_objectId);
 	if(obj == nil || obj->m_colModel == nil)
@@ -805,7 +806,10 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 
 	CColModel *col = obj->m_colModel;
 	rw::Matrix invMat;
-	rw::Matrix::invert(&invMat, &inst->m_matrix);
+	if(preInv)
+		invMat = *preInv;
+	else
+		rw::Matrix::invert(&invMat, &inst->m_matrix);
 
 	Ray ray;
 	ray.start = worldRay.start;
@@ -821,6 +825,7 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 
 	float bestT = 1.0e30f;
 	bool found = false;
+	int bestSurface = -1;
 	rw::V3d bestNormal = { 0.0f, 0.0f, 1.0f };
 
 	for(int i = 0; i < col->numTriangles; i++){
@@ -832,6 +837,7 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 		if(IntersectRayTriangle(ray, a, b, c, &t) && t < bestT){
 			bestT = t;
 			bestNormal = normalize(cross(sub(b, a), sub(c, a)));
+			bestSurface = tri->surface;
 			found = true;
 		}
 	}
@@ -841,6 +847,7 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 		if(IntersectRayBox(ray, col->boxes[i].box, &t) && t < bestT){
 			bestT = t;
 			bestNormal = GetBoxHitNormal(ray, col->boxes[i].box, t);
+			bestSurface = col->boxes[i].surface;
 			found = true;
 		}
 	}
@@ -851,6 +858,7 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 			rw::V3d localHit = add(ray.start, scale(ray.dir, t));
 			bestT = t;
 			bestNormal = normalize(sub(localHit, col->spheres[i].sph.center));
+			bestSurface = col->spheres[i].surface;
 			found = true;
 		}
 	}
@@ -859,6 +867,8 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 		return false;
 
 	*hitPos = add(worldRay.start, scale(worldRay.dir, bestT));
+	if(hitSurface)
+		*hitSurface = bestSurface;
 	if(hitNormal){
 		*hitNormal = bestNormal;
 		rw::V3d::transformVectors(hitNormal, hitNormal, 1, &inst->m_matrix);
@@ -867,10 +877,25 @@ IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hit
 	return true;
 }
 
+static bool
+IntersectRayColModelDetailed(const Ray &worldRay, ObjectInst *inst, rw::V3d *hitPos, rw::V3d *hitNormal)
+{
+	return IntersectRayColModelFull(worldRay, inst, nil, hitPos, hitNormal, nil);
+}
+
 bool
 IntersectRayColModel(const Ray &worldRay, ObjectInst *inst, rw::V3d *hitPos)
 {
 	return IntersectRayColModelDetailed(worldRay, inst, hitPos, nil);
+}
+
+// Same, also returning the collision surface (surfinfo.dat index) that was hit;
+// invMat may be a precomputed inverse of inst->m_matrix (nil to compute it).
+bool
+IntersectRayColModelSurface(const Ray &worldRay, ObjectInst *inst, const rw::Matrix *invMat,
+	rw::V3d *hitPos, int *surface)
+{
+	return IntersectRayColModelFull(worldRay, inst, invMat, hitPos, nil, surface);
 }
 
 static bool
@@ -2650,6 +2675,8 @@ Draw(void)
 
 	TheCamera.m_rwcam->setFarPlane(max(Timecycle::currentColours.farClp, 500.0f));
 	TheCamera.m_rwcam->fogPlane = Timecycle::currentColours.fogSt;
+	if(gCameraOrtho)
+		TheCamera.m_rwcam->fogPlane = TheCamera.m_rwcam->farPlane;	// top-down agent capture: no fog
 	TheCamera.m_rwcam_viewer->setFarPlane(5000.0f);
 	TheCamera.m_rwcam_viewer->fogPlane = Timecycle::currentColours.fogSt;
 
@@ -2705,7 +2732,7 @@ Draw(void)
 
 	DefinedState();
 	Scene.camera->clear(&clearcol, rw::Camera::CLEARIMAGE|rw::Camera::CLEARZ);
-	if(gRenderBackground){
+	if(gRenderBackground && !gCameraOrtho){	// sky dome would cover a parallel projection
 		SetRenderState(rw::ALPHATESTREF, 0);
 		SetRenderState(rw::CULLMODE, rw::CULLNONE);
 		rw::RGBA skytop, skybot;
@@ -2725,7 +2752,7 @@ Draw(void)
 		SetRenderState(rw::ALPHATESTREF, params.alphaRef);
 	}
 
-	rw::SetRenderState(rw::FOGENABLE, gEnableFog);
+	rw::SetRenderState(rw::FOGENABLE, gEnableFog && !gCameraOrtho);	// agent top-down capture: no fog
 	RenderOpaque();
 	if(gRenderWater)
 		WaterLevel::Render();

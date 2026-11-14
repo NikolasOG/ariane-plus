@@ -31,6 +31,100 @@ def emit(payload: object) -> None:
 	print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+def patch_in_chunks(service, ops: list[dict], size: int = 400) -> dict:
+	"""Apply many simple operations as a few patches (one bridge round trip each)."""
+	done = 0
+	for i in range(0, len(ops), size):
+		service.apply_scene_patch(ops[i:i + size])
+		done += len(ops[i:i + size])
+	return {"ok": True, "applied": done}
+
+
+def settle_objects(service, client, args) -> dict:
+	"""Dig-in settling for placed objects (stack aware, terrain-only raycasts)."""
+	import math
+	items = [i for i in service.enumerate_scene() if i.get("agent_scene", True)]
+	items = [i for i in items if not str(i.get("name", "")).lower().startswith("lod")]
+	box = [float(v) for v in args.bbox.split(",")] if args.bbox else None
+	want_models = set(args.models or []); want_ids = set(args.ids or [])
+	bounds_cache: dict = {}
+	def bounds(model):
+		if model not in bounds_cache:
+			bounds_cache[model] = service.probe_asset(model, ensure_renderable=True).get("collision_bounds")
+		return bounds_cache[model]
+	def footprint(it, grow=0.0):
+		b = bounds(it["model_id"])
+		if not b: return None
+		(ax, ay, _), (bx, by, _) = b
+		h = math.radians(it["rotation"][2]); c, s = math.cos(h), math.sin(h)
+		x, y = it["position"][:2]
+		return [(x + lx * c - ly * s, y + lx * s + ly * c)
+		        for lx, ly in ((ax - grow, ay - grow), (bx + grow, ay - grow), (bx + grow, by + grow), (ax - grow, by + grow))]
+	def inside(px, py, quad):
+		sign = None
+		for i in range(4):
+			(x1, y1), (x2, y2) = quad[i], quad[(i + 1) % 4]
+			cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+			if abs(cross) < 1e-9: continue
+			if sign is None: sign = cross > 0
+			elif (cross > 0) != sign: return False
+		return True
+	# a stack = a base object plus everything resting on it: centre inside its
+	# footprint and higher up (stacked containers, a hut or lamp on a post...)
+	items.sort(key=lambda i: i["position"][2])
+	rider_of: dict = {}
+	stacks: dict = {}
+	for it in items:
+		if it["instance_id"] in rider_of: continue
+		quad = footprint(it, 0.2)
+		group = [it]
+		if quad:
+			bz = it["position"][2]
+			for other in items:
+				if other is it or other["instance_id"] in rider_of: continue
+				if other["position"][2] > bz + 0.5 and inside(other["position"][0], other["position"][1], quad):
+					rider_of[other["instance_id"]] = it["instance_id"]; group.append(other)
+		stacks[it["instance_id"]] = group
+	def ground(x, y, z):
+		for _ in range(10):
+			hit = client.raycast_segment([x, y, z], [x, y, z - 60.0]).get("hit")
+			if not hit: return None
+			if not hit.get("agent_scene"): return hit["point"][2]
+			z = hit["point"][2] - 0.02
+		return None
+	ops, report = [], []
+	for stack in stacks.values():
+		stack.sort(key=lambda i: i["position"][2])
+		base = stack[0]
+		x, y, z = base["position"]
+		if box and not (box[0] <= x <= box[2] and box[1] <= y <= box[3]): continue
+		if want_models and base["model_id"] not in want_models: continue
+		if want_ids and base["instance_id"] not in want_ids: continue
+		b = bounds(base["model_id"])
+		if not b: continue
+		(ax, ay, az), (bx, by, _) = b
+		ax += 0.3; ay += 0.3; bx -= 0.3; by -= 0.3
+		h = math.radians(base["rotation"][2]); c, s = math.cos(h), math.sin(h)
+		pts = [(x + lx * c - ly * s, y + lx * s + ly * c) for lx, ly in ((ax, ay), (bx, ay), (bx, by), (ax, by), (0, 0))]
+		bottom = z + az
+		gs = [g for g in (ground(px, py, bottom + 1.0) for px, py in pts) if g is not None]
+		if len(gs) < 3:
+			report.append({"instance_id": base["instance_id"], "skipped": "no ground under footprint"}); continue
+		gap = bottom - min(gs)
+		relief = max(gs) - min(gs)
+		if gap <= args.min_gap: continue
+		for it in stack:
+			ix, iy, iz = it["position"]
+			ops.append({"action": "transform", "instance_id": it["instance_id"], "x": ix, "y": iy,
+			            "z": iz - gap - 0.03, "heading": it["rotation"][2], "snap": False})
+		if gap > 0.5 or relief > 1.5:
+			report.append({"instance_id": base["instance_id"], "name": base.get("name"), "lowered": round(gap, 2),
+			               "relief": round(relief, 2), "position": [round(x, 1), round(y, 1)]})
+	if ops and not args.dry_run:
+		patch_in_chunks(service, ops)
+	return {"ok": True, "transforms": len(ops), "dry_run": args.dry_run, "notes": report}
+
+
 def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	sub.add_parser("ping")
 	sub.add_parser("capabilities")
@@ -63,8 +157,61 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	fit.add_argument("instance_id", type=int); fit.add_argument("profile", choices=("building", "prop"))
 	fit.add_argument("--radius", type=float, default=30.0); fit.add_argument("--step", type=float, default=3.0)
 	fit.add_argument("--max-relief", type=float)
-	delete = sub.add_parser("delete")
-	delete.add_argument("instance_id", type=int)
+	delete = sub.add_parser("delete", help="Delete one or more instances (one patch)")
+	delete.add_argument("instance_id", type=int, nargs="+")
+	tbatch = sub.add_parser("transform-batch",
+		help="Move many instances in one patch: TSV rows 'instance_id x y z heading [snap]'")
+	tbatch.add_argument("file", type=Path)
+	settle = sub.add_parser("settle",
+		help="Dig placed objects into the terrain: lower each (and anything stacked on it) until its lowest "
+		     "footprint point touches the ground; ground found by raycasts that skip placed objects")
+	settle.add_argument("--bbox", help="x0,y0,x1,y1 world rectangle (default: whole layer)")
+	settle.add_argument("--models", type=int, nargs="*", help="only these model ids")
+	settle.add_argument("--ids", type=int, nargs="*", help="only these instance ids")
+	settle.add_argument("--min-gap", type=float, default=0.05)
+	settle.add_argument("--dry-run", action="store_true")
+	gscan = sub.add_parser("ground-scan",
+		help="Map ground height + collision surface (DIRTTRACK, SAND, TARMAC...) over a rectangle")
+	gscan.add_argument("--bbox", required=True, help="x0,y0,x1,y1 (use --bbox=... for negative values)")
+	gscan.add_argument("--step", type=float, default=1.0)
+	gscan.add_argument("--out", type=Path, required=True, help="scan JSON")
+	gscan.add_argument("--png", type=Path, help="coloured surface map (north up)")
+	gscan.add_argument("--layer", choices=("ground", "top"), default="ground")
+	gscan.add_argument("--include-agent", action="store_true", help="also hit placed (layer) objects")
+	gscan.add_argument("--game-dir", help="for surface names (default: ARIANE_GAME_DIR)")
+	tmask = sub.add_parser("track-mask", help="Summarise / render the track cells of a ground scan")
+	tmask.add_argument("scan", type=Path)
+	tmask.add_argument("--surface", nargs="+", default=["DIRTTRACK"])
+	tmask.add_argument("--png", type=Path)
+	tmask.add_argument("--at", type=float, nargs=2, metavar=("X", "Y"), help="query distance + direction at a point")
+	ortho = sub.add_parser("capture-ortho",
+		help="Straight-down orthographic capture with a known metres-per-pixel scale (no fog, long draw distance)")
+	ortho.add_argument("cx", type=float); ortho.add_argument("cy", type=float)
+	ortho.add_argument("half_width", type=float, help="half of the captured width in metres")
+	ortho.add_argument("--out", type=Path, required=True)
+	ortho.add_argument("--cam-z", type=float, default=250.0)
+	ortho.add_argument("--lod-mult", type=float, default=3.0)
+	ortho.add_argument("--delay", type=int, default=30, help="frames to wait for streaming")
+	prefab = sub.add_parser("prefab", help="Reusable multi-part structures (save from placed objects, place anywhere)")
+	prefab_sub = prefab.add_subparsers(dest="prefab_command", required=True)
+	prefab_sub.add_parser("list")
+	psave = prefab_sub.add_parser("save"); psave.add_argument("name")
+	psave.add_argument("--ids", type=int, nargs="+", required=True)
+	psave.add_argument("--origin", type=float, nargs=3, metavar=("X", "Y", "HEADING"),
+	                   help="prefab origin + facing (default: first instance)")
+	psave.add_argument("--notes", default="")
+	pplace = prefab_sub.add_parser("place"); pplace.add_argument("name", help="saved name or a .json path")
+	for n in ("x", "y", "heading"): pplace.add_argument(n, type=float)
+	pplace.add_argument("--no-snap", action="store_true")
+	lintp = sub.add_parser("lint", help="Check a site: wall gaps, overlaps, world clashes, objects on tracks / roads")
+	lintp.add_argument("--site", type=Path, required=True, help="site JSON (perimeter, gates, scan...)")
+	lintp.add_argument("--json", type=Path, help="write the issue list here")
+	lintp.add_argument("--fix-ids", type=Path, help="write ids of interior objects that would resolve issues")
+	lintp.add_argument("--protect", type=int, nargs="*", default=[])
+	lintp.add_argument("--max", type=int, default=40, help="issues to print")
+	ssync = sub.add_parser("samp-sync", help="SA-MP > Sync to server (writes scriptfiles/ariane_live.txt)")
+	ssync.add_argument("--map", help="map name (also used for gamemodes/wasteland/maps/<name>.inc)")
+	ssync.add_argument("--force", action="store_true", help="allow syncing an empty layer")
 	suppress = sub.add_parser("suppress-world-models")
 	suppress.add_argument("x", type=float); suppress.add_argument("y", type=float)
 	suppress.add_argument("radius", type=float); suppress.add_argument("model_ids", type=int, nargs="+")
@@ -212,6 +359,9 @@ def main(argv: list[str] | None = None) -> int:
 	search.add_argument("--category"); search.add_argument("--max-width", type=float)
 	search.add_argument("--max-depth", type=float); search.add_argument("--has-collision", action="store_true")
 	search.add_argument("--include-lod", action="store_true"); search.add_argument("--limit", type=int, default=30)
+	search.add_argument("--include-hazards", action="store_true", help="also return explosive props (hidden by default)")
+	hazards = asset_sub.add_parser("mark-hazards", help="Tag explosive / breakable / dynamic assets from data/object.dat")
+	hazards.add_argument("--game-dir", help="default: ARIANE_GAME_DIR")
 	search.add_argument("--defined-only", action="store_true",
 	                    help="only return models known to the running engine")
 	inspect = asset_sub.add_parser("inspect"); inspect.add_argument("asset_id", type=int)
@@ -327,7 +477,12 @@ def main(argv: list[str] | None = None) -> int:
 					payload = {"assets": AssetIndex(args.db).search(
 						args.query, category=args.category, max_width=args.max_width,
 						max_depth=args.max_depth, has_collision=True if args.has_collision else None,
-						exclude_lod=not args.include_lod, limit=args.limit)}
+						exclude_lod=not args.include_lod, limit=args.limit, include_hazards=args.include_hazards)}
+			elif args.asset_command == "mark-hazards":
+				import os
+				game_dir = args.game_dir or os.environ.get("ARIANE_GAME_DIR")
+				if not game_dir: raise ValueError("pass --game-dir or set ARIANE_GAME_DIR")
+				payload = AssetIndex(args.db).mark_hazards(game_dir)
 			elif args.asset_command == "inspect":
 				if args.ensure_renderable:
 					payload = {"asset": ArianeService(args.socket, args.db, args.timeout,
@@ -411,6 +566,93 @@ def main(argv: list[str] | None = None) -> int:
 			elif args.checkpoint_command == "list": payload = checkpoint_service.checkpoint_list()
 			elif args.checkpoint_command == "save": payload = checkpoint_service.checkpoint_save(args.name)
 			else: payload = checkpoint_service.checkpoint_restore(args.name)
+		elif args.command == "lint":
+			if __package__:
+				from . import lint as lint_mod
+			else:
+				import lint as lint_mod
+			service = ArianeService(args.socket, args.db, max(args.timeout, 120.0), args.discovery_dir, args.state_dir)
+			site = json.loads(args.site.read_text(encoding="utf-8"))
+			result = lint_mod.lint(service, site, base_dir=args.site.parent)
+			if args.fix_ids:
+				kill, flagged = lint_mod.fix_ids(result, set(args.protect))
+				args.fix_ids.write_text(" ".join(map(str, kill)), encoding="utf-8")
+				result["fix"] = {"delete": len(kill), "file": str(args.fix_ids), "protected_but_flagged": flagged}
+			result.pop("_internal", None)
+			if args.json:
+				args.json.write_text(json.dumps(result["issues"], indent=1), encoding="utf-8")
+			payload = {k: v for k, v in result.items() if k != "issues"}
+			payload["issues"] = result["issues"][:args.max]
+			payload["issues_total"] = len(result["issues"])
+		elif args.command == "prefab":
+			if __package__:
+				from . import prefabs
+			else:
+				import prefabs
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			if args.prefab_command == "list":
+				payload = {"ok": True, "prefabs": prefabs.list_prefabs(service)}
+			elif args.prefab_command == "save":
+				payload = prefabs.save_prefab(service, args.name, args.ids, tuple(args.origin) if args.origin else None, args.notes)
+			else:
+				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
+				                               args.heading, snap=not args.no_snap)
+		elif args.command in {"ground-scan", "track-mask", "capture-ortho", "samp-sync"}:
+			if __package__:
+				from . import ground
+			else:
+				import ground
+			if args.command == "track-mask":
+				data = ground.load(args.scan)
+				mask = ground.TrackMask(data, tuple(args.surface))
+				payload = {"ok": True, **mask.stats()}
+				if args.at:
+					d = mask.direction(*args.at)
+					payload["at"] = {"distance": round(d[0], 2), "direction": [round(d[1], 3), round(d[2], 3)],
+					                 "nearest": [round(d[3], 2), round(d[4], 2)]} if d else None
+				if args.png:
+					view = dict(data)
+					names = [n.upper() for n in data["surface_names"]]
+					keep = {names.index(n.upper()) for n in args.surface if n.upper() in names}
+					view["ground_surface"] = [(s if m else (names.index("SAND_MEDIUM") if "SAND_MEDIUM" in names else -1))
+					                          for s, m in zip(data["ground_surface"], mask.mask)]
+					ground.render_png(view, args.png)
+					payload["png"] = str(args.png)
+			else:
+				client = ArianeClient(args.socket, max(args.timeout, 120.0))
+				if args.command == "ground-scan":
+					box = tuple(float(v) for v in args.bbox.split(","))
+					data = ground.scan(client, box, args.step, include_agent=args.include_agent, game_dir=args.game_dir)
+					ground.save(data, args.out)
+					from collections import Counter
+					classes = Counter(ground.class_at(data, i, args.layer) for i in range(data["nx"] * data["ny"]))
+					names = data["surface_names"]
+					surfaces = Counter(names[s] if 0 <= s < len(names) else "none" for s in data[f"{args.layer}_surface"])
+					payload = {"ok": True, "out": str(args.out), "grid": [data["nx"], data["ny"]], "step": args.step,
+					           "classes": dict(classes.most_common()), "surfaces": dict(surfaces.most_common(12))}
+					if args.png:
+						ground.render_png(data, args.png, args.layer)
+						payload["png"] = str(args.png)
+				elif args.command == "capture-ortho":
+					payload = client.command("capture_ortho", args.out.resolve(), args.cx, args.cy, args.half_width,
+					                         args.cam_z, args.lod_mult, args.delay)
+				else:
+					payload = client.command("samp_sync", args.map or "-", int(args.force))
+		elif args.command in {"transform-batch", "settle"} or (args.command == "delete" and len(args.instance_id) > 1):
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			if args.command == "delete":
+				payload = patch_in_chunks(service, [{"action": "delete", "instance_id": i} for i in args.instance_id])
+			elif args.command == "transform-batch":
+				ops = []
+				for line in args.file.read_text(encoding="utf-8").splitlines():
+					cols = line.split()
+					if len(cols) < 5 or cols[0].startswith("#"): continue
+					ops.append({"action": "transform", "instance_id": int(cols[0]), "x": float(cols[1]), "y": float(cols[2]),
+					            "z": float(cols[3]), "heading": float(cols[4]),
+					            "snap": len(cols) > 5 and cols[5] not in ("0", "false")})
+				payload = patch_in_chunks(service, ops)
+			else:
+				payload = settle_objects(service, ArianeClient(args.socket, args.timeout), args)
 		elif args.command in {"place", "transform", "transform3d", "delete", "clear", "suppress-world-models"}:
 			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
 			if args.command == "clear": payload = service.engine("clear")
@@ -419,7 +661,7 @@ def main(argv: list[str] | None = None) -> int:
 			else:
 				op = {"action": args.command}
 				if args.command == "place": op.update(key=f"cli:{uuid.uuid4().hex}", model=args.model)
-				else: op["instance_id"] = args.instance_id
+				else: op["instance_id"] = args.instance_id[0] if isinstance(args.instance_id, list) else args.instance_id
 				if args.command != "delete":
 					op.update(x=args.x, y=args.y, z=args.z, heading=args.yaw if args.command == "transform3d" else args.heading,
 					          snap=not getattr(args, "no_snap", True))

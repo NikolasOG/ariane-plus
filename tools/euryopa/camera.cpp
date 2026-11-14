@@ -20,9 +20,24 @@ CCamera TheCamera;
 using rw::Quat;
 using rw::V3d;
 
+// A view exactly along the up vector makes every cross(dir, up) zero and the
+// camera maths NaN (black frame / crash in BuildRenderList). Tilt the target
+// by a hair (~0.06 deg) so straight-down views stay usable.
+void
+CCamera::sanitize(void)
+{
+	V3d dir = sub(m_target, m_position);
+	float len = length(dir);
+	if(len < 0.0001f || !(len == len))
+		return;
+	if(length(cross(scale(dir, 1.0f/len), normalize(m_up))) < 0.001f)
+		m_target.y += len * 0.001f;
+}
+
 void
 CCamera::Process(void)
 {
+	sanitize();
 	float scl = avgTimeStep*30.0f;
 	float sensitivity = 1.0f;
 
@@ -154,13 +169,31 @@ CCamera::DrawTarget(void)
 	RenderAxesWidget(this->m_target, x, y, z);
 }
 
+bool gCameraOrtho;
+float gCameraOrthoHalfWidth = 50.0f;
+
 void
 CCamera::update(void)
 {
+	sanitize();
 	m_fov = ClampCameraFov(m_fov);
 	if(m_rwcam){
 		m_rwcam->setFOV(m_fov, m_aspectRatio);
 		m_rwcam_viewer->setFOV(m_fov, m_aspectRatio);
+		rw::Camera *cams[2] = { m_rwcam, m_rwcam_viewer };
+		for(rw::Camera *cam : cams){
+			if(cam == nil) continue;
+			if(gCameraOrtho){
+				// straight-down agent capture: viewWindow is the half extent in metres
+				rw::V2d w = { gCameraOrthoHalfWidth, gCameraOrthoHalfWidth / m_aspectRatio };
+				if(cam->projection != rw::Camera::PARALLEL)
+					cam->setProjection(rw::Camera::PARALLEL);
+				cam->setViewWindow(&w);
+			}else if(cam->projection != rw::Camera::PERSPECTIVE){
+				cam->setProjection(rw::Camera::PERSPECTIVE);
+				cam->setFOV(m_fov, m_aspectRatio);
+			}
+		}
 
 		rw::Frame *f = m_rwcam->getFrame();
 		if(f){
@@ -168,7 +201,14 @@ CCamera::update(void)
 			if(length(dir) < 0.0001f)
 				dir = m_at;
 			m_at = normalize(dir);
-			f->matrix.lookAt(m_at, m_up);
+			// looking straight up/down along the up vector makes lookAt degenerate
+			// (NaN frame -> garbage frustum -> crash); pick a horizontal up instead
+			V3d up = m_up;
+			if(length(cross(m_at, up)) < 0.001f){
+				V3d northUp = { 0.0f, 1.0f, 0.0f }, eastUp = { 1.0f, 0.0f, 0.0f };
+				up = length(cross(m_at, northUp)) > 0.001f ? northUp : eastUp;
+			}
+			f->matrix.lookAt(m_at, up);
 			f->matrix.pos = m_position;
 			f->updateObjects();
 		}

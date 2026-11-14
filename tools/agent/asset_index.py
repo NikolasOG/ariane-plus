@@ -433,11 +433,63 @@ class AssetIndex:
 			row = connection.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
 		return _decorate_asset(dict(row)) if row else None
 
+	def mark_hazards(self, game_dir: str | Path) -> dict:
+		"""Tag assets from data/object.dat: explosive (blows up / explosion FX when
+		destroyed), breakable (smashes when hit) and dynamic (has physics data),
+		plus nobounds when no collision size is known. Stored in assets.hazard."""
+		game_dir = Path(game_dir)
+		path = next((game_dir / n for n in ("data/object.dat", "DATA/OBJECT.DAT", "data/OBJECT.DAT")
+		             if (game_dir / n).exists()), None)
+		if path is None:
+			raise FileNotFoundError(f"object.dat not found under {game_dir}")
+		flags: dict[str, set[str]] = {}
+		for line in path.read_text(encoding="latin-1").splitlines():
+			line = line.strip()
+			if not line or line.startswith(";") or line.startswith("*"):
+				continue
+			tokens = [t for t in re.split(r"[\s,]+", line) if t]
+			if len(tokens) < 13:
+				continue
+			name = tokens[0].lower()
+			tags = {"dynamic"}
+			try:
+				damage_effect = int(float(tokens[8]))
+				causes_explosion = int(float(tokens[11]))
+			except ValueError:
+				continue
+			if causes_explosion or any("explosion" in t.lower() for t in tokens[12:]):
+				tags.add("explosive")
+			elif damage_effect in (1, 20, 21, 200, 202):
+				tags.add("breakable")
+			flags[name] = tags
+		with closing(self._connect()) as connection:
+			columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
+			if "hazard" not in columns:
+				connection.execute("ALTER TABLE assets ADD COLUMN hazard TEXT NOT NULL DEFAULT ''")
+			counts = {"explosive": 0, "breakable": 0, "dynamic": 0, "nobounds": 0}
+			rows = connection.execute("SELECT id, name, width, has_collision FROM assets").fetchall()
+			for asset_id, name, width, has_collision in rows:
+				tags = set(flags.get((name or "").lower(), set()))
+				if "explosion" in (name or "").lower() or "explosive" in (name or "").lower():
+					tags.add("explosive")               # SA-MP particle objects (explosion_barrel...)
+				if width is None or not has_collision:
+					tags.add("nobounds")
+				for t in tags:
+					counts[t] = counts.get(t, 0) + 1
+				connection.execute("UPDATE assets SET hazard = ? WHERE id = ?", (",".join(sorted(tags)), asset_id))
+			connection.commit()
+		return {"ok": True, "object_dat": str(path), "tagged": counts}
+
 	def search(self, query: str = "", *, category: str | None = None,
 	           max_width: float | None = None, max_depth: float | None = None,
 	           has_collision: bool | None = None, exclude_lod: bool = True,
-	           limit: int = 30) -> list[dict]:
+	           limit: int = 30, include_hazards: bool = False) -> list[dict]:
 		clauses, values = [], []
+		with closing(self._connect()) as connection:
+			has_hazard = "hazard" in {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
+		if has_hazard and not include_hazards:
+			# explosive props blow up when shot (barrel4, flame drums...): opt-in only
+			clauses.append("a.hazard NOT LIKE '%explosive%'")
 		join = ""
 		order = "a.native_count DESC, a.id"
 		if query.strip():

@@ -37,6 +37,7 @@ public:
 	void setDistanceToTarget(float dist);
 
 	void update(void);
+	void sanitize(void);	// keep the view off the exact up axis
 	float distanceTo(rw::V3d v);
 	float distanceToTarget(void);
 	float minDistToSphere(float r);

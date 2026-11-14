@@ -84,6 +84,10 @@ static AgentCameraPose gAgentCaptureRestorePose;
 static bool gAgentCaptureRestore;
 static uint32 gAgentCaptureCameraRevision;
 static std::string gAgentCaptureLabel;
+static bool gAgentCaptureOrtho;			// capture_ortho in flight: restore projection + draw distance after
+static float gAgentCaptureSavedLodMult = 1.0f;
+static int gAgentCaptureDelayFrames;		// let streaming load models before grabbing the frame
+static float gAgentCaptureOrthoCenter[2];
 
 #ifdef _WIN32
 typedef SOCKET AgentSocket;
@@ -1016,7 +1020,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -1800,6 +1804,137 @@ handleRequest(const std::vector<std::string> &lines)
 		writeResponse(requestId, true, body);
 		return;
 	}
+	if(command == "ground_scan"){
+		// Bulk vertical raycasts over a rectangle: for every cell the topmost hit
+		// (height, collision surface, model) and the lowest hit (the ground under
+		// roofs / trees). Agent-layer objects are skipped unless asked for.
+		float x0, y0, x1, y1, step, zTop = 400.0f;
+		int includeAgent = 0;
+		if(lines.size() < 7 || !parseFloat(lines[2], &x0) || !parseFloat(lines[3], &y0) ||
+		   !parseFloat(lines[4], &x1) || !parseFloat(lines[5], &y1) || !parseFloat(lines[6], &step) ||
+		   (lines.size() > 7 && !parseFloat(lines[7], &zTop)) ||
+		   (lines.size() > 8 && !parseInt(lines[8], &includeAgent)) ||
+		   x1 <= x0 || y1 <= y0 || step < 0.25f){
+			writeError(requestId, "ground_scan requires x0 y0 x1 y1 step(>=0.25) [z_top] [include_agent]"); return;
+		}
+		int nx = (int)floorf((x1 - x0) / step) + 1, ny = (int)floorf((y1 - y0) / step) + 1;
+		if((long)nx * ny > 160000){
+			writeError(requestId, "ground_scan grid too large (max 160000 cells); tile the request"); return;
+		}
+		struct Cand { ObjectInst *inst; rw::Matrix inv; };
+		std::vector<Cand> cands;
+		const float BUCKET = 16.0f;
+		int bx = (int)ceilf((x1 - x0) / BUCKET) + 1, by = (int)ceilf((y1 - y0) / BUCKET) + 1;
+		std::vector<std::vector<int>> buckets((size_t)bx * by);
+		for(CPtrNode *node = instances.first; node; node = node->next){
+			ObjectInst *inst = (ObjectInst*)node->item;
+			if(inst->m_isDeleted || inst->m_numChildren > 0) continue;
+			if(!gNoAreaCull && inst->m_area != currentArea && inst->m_area != 13) continue;
+			if(!includeAgent && isAgentSceneInstance(inst)) continue;
+			ObjectDef *obj = GetObjectDef(inst->m_objectId);
+			if(obj == nil || obj->m_colModel == nil) continue;
+			rw::V3d c = obj->m_colModel->boundingSphere.center;
+			rw::V3d::transformPoints(&c, &c, 1, &inst->m_matrix);
+			float r = obj->m_colModel->boundingSphere.radius;
+			if(c.x + r < x0 || c.x - r > x1 || c.y + r < y0 || c.y - r > y1) continue;
+			Cand cand; cand.inst = inst;
+			rw::Matrix::invert(&cand.inv, &inst->m_matrix);
+			int idx = (int)cands.size();
+			cands.push_back(cand);
+			int ix0 = std::max(0, (int)floorf((c.x - r - x0) / BUCKET)), ix1 = std::min(bx - 1, (int)floorf((c.x + r - x0) / BUCKET));
+			int iy0 = std::max(0, (int)floorf((c.y - r - y0) / BUCKET)), iy1 = std::min(by - 1, (int)floorf((c.y + r - y0) / BUCKET));
+			for(int iy = iy0; iy <= iy1; iy++) for(int ix = ix0; ix <= ix1; ix++)
+				buckets[(size_t)iy * bx + ix].push_back(idx);
+		}
+		std::string zs, ss, ms, gzs, gss;
+		zs.reserve((size_t)nx * ny * 7); gzs.reserve((size_t)nx * ny * 7);
+		char num[32];
+		for(int row = 0; row < ny; row++) for(int col = 0; col < nx; col++){
+			float x = x0 + col * step, y = y0 + row * step;
+			Ray ray; ray.start.x = x; ray.start.y = y; ray.start.z = zTop;
+			ray.dir.x = 0.0f; ray.dir.y = 0.0f; ray.dir.z = -1.0f;
+			int bix = std::min(bx - 1, (int)((x - x0) / BUCKET)), biy = std::min(by - 1, (int)((y - y0) / BUCKET));
+			float topZ = -1.0e9f, lowZ = 1.0e9f; int topS = -1, lowS = -1, topM = 0;
+			bool any = false;
+			for(int idx : buckets[(size_t)biy * bx + bix]){
+				rw::V3d hit; int surf = -1;
+				if(IntersectRayColModelSurface(ray, cands[idx].inst, &cands[idx].inv, &hit, &surf)){
+					any = true;
+					if(hit.z > topZ){ topZ = hit.z; topS = surf; topM = cands[idx].inst->m_objectId; }
+					if(hit.z < lowZ){ lowZ = hit.z; lowS = surf; }
+				}
+			}
+			const char *sep = (row || col) ? "," : "";
+			if(!any){
+				zs += sep; zs += "null"; ss += sep; ss += "-1"; ms += sep; ms += "0";
+				gzs += sep; gzs += "null"; gss += sep; gss += "-1";
+				continue;
+			}
+			snprintf(num, sizeof(num), "%s%.2f", sep, topZ); zs += num;
+			snprintf(num, sizeof(num), "%s%d", sep, topS); ss += num;
+			snprintf(num, sizeof(num), "%s%d", sep, topM); ms += num;
+			snprintf(num, sizeof(num), "%s%.2f", sep, lowZ); gzs += num;
+			snprintf(num, sizeof(num), "%s%d", sep, lowS); gss += num;
+		}
+		char head[256];
+		snprintf(head, sizeof(head), "\"origin\":[%.3f,%.3f],\"step\":%.3f,\"nx\":%d,\"ny\":%d,\"candidates\":%d,",
+			x0, y0, step, nx, ny, (int)cands.size());
+		writeResponse(requestId, true, std::string(head) + "\"top_z\":[" + zs + "],\"top_surface\":[" + ss +
+			"],\"top_model\":[" + ms + "],\"ground_z\":[" + gzs + "],\"ground_surface\":[" + gss + "]");
+		return;
+	}
+	if(command == "capture_ortho"){
+		// Straight-down orthographic capture: parallel projection with a known
+		// scale, fog off and draw distance raised so placed objects aren't culled.
+		float cx, cy, halfW, camZ = 250.0f, lodMult = 3.0f; int delay = 30;
+		if(lines.size() < 6 || lines[2].empty() || !parseFloat(lines[3], &cx) || !parseFloat(lines[4], &cy) ||
+		   !parseFloat(lines[5], &halfW) || halfW < 2.0f || halfW > 1500.0f ||
+		   (lines.size() > 6 && !parseFloat(lines[6], &camZ)) ||
+		   (lines.size() > 7 && !parseFloat(lines[7], &lodMult)) ||
+		   (lines.size() > 8 && !parseInt(lines[8], &delay))){
+			writeError(requestId, "capture_ortho requires path cx cy half_width [cam_z] [lod_mult] [delay_frames]"); return;
+		}
+		strncpy(gAgentCapturePath, lines[2].c_str(), sizeof(gAgentCapturePath) - 1);
+		gAgentCapturePath[sizeof(gAgentCapturePath) - 1] = '\0';
+		gAgentCaptureLabel = "ortho";
+		gAgentCaptureRestorePose = currentCameraPose();
+		gAgentCaptureRestore = true;
+		AgentCameraPose pose;
+		pose.position.x = cx; pose.position.y = cy; pose.position.z = camZ;
+		pose.target.x = cx; pose.target.y = cy; pose.target.z = camZ - 10.0f;
+		pose.up.x = 0.0f; pose.up.y = 1.0f; pose.up.z = 0.0f;
+		pose.fov = TheCamera.m_fov;
+		applyCameraPose(pose);
+		gAgentCameraRevision++;
+		gAgentCaptureOrtho = true;
+		gAgentCaptureSavedLodMult = TheCamera.m_LODmult;
+		TheCamera.m_LODmult = std::max(0.5f, std::min(lodMult, 10.0f));
+		gCameraOrtho = true;
+		gCameraOrthoHalfWidth = halfW;
+		gAgentCaptureOrthoCenter[0] = cx; gAgentCaptureOrthoCenter[1] = cy;
+		gAgentCaptureDelayFrames = std::max(0, std::min(delay, 600));
+		gAgentCapturePose = currentCameraPose();
+		gAgentCaptureCameraRevision = gAgentCameraRevision;
+		gAgentPendingRequestId = requestId;
+		gAgentCapturePending = true;
+		return;
+	}
+	if(command == "samp_sync"){
+		// Same as SA-MP > Sync to server; lines[2] optional map name ("-" keeps it), lines[3] force
+		const char *name = (lines.size() > 2 && lines[2] != "-" && !lines[2].empty()) ? lines[2].c_str() : nil;
+		int force = 0;
+		if(lines.size() > 3 && !parseInt(lines[3], &force)){
+			writeError(requestId, "samp_sync requires [map_name|-] [force 0/1]"); return;
+		}
+		int objects = 0, removals = 0;
+		char message[1400];
+		bool ok = SampAgentSync(name, force != 0, &objects, &removals, message, sizeof(message));
+		std::string body = std::string("\"objects\":") + std::to_string(objects) + ",\"removals\":" +
+			std::to_string(removals) + ",\"message\":\"" + jsonEscape(message) + "\"";
+		if(!ok) body = std::string("\"error\":\"") + jsonEscape(message) + "\"," + body;
+		writeResponse(requestId, ok, body);
+		return;
+	}
 	if(command == "raycast_segment"){
 		if(lines.size() < 8){
 			writeError(requestId, "raycast_segment requires start xyz and target xyz");
@@ -1829,16 +1964,20 @@ handleRequest(const std::vector<std::string> &lines)
 			start, target, &hit, &hitDistance, targetTolerance);
 		if(inst){
 			ObjectDef *object = GetObjectDef(inst->m_objectId);
+			int surface = -1;
+			rw::V3d surfaceHit;
+			Ray surfaceRay = { start, rw::normalize(rw::sub(target, start)) };
+			IntersectRayColModelSurface(surfaceRay, inst, nil, &surfaceHit, &surface);
 			char body[768];
 			snprintf(body, sizeof(body),
 				"\"ray\":{\"visible\":false,\"distance\":%.5f,\"target_tolerance\":%.3f,"
 				"\"hit\":{\"point\":[%.5f,%.5f,%.5f],\"distance\":%.5f,"
 				"\"fraction\":%.6f,\"instance_id\":%d,\"model_id\":%d,\"name\":\"%s\","
-				"\"agent_scene\":%s}}",
+				"\"agent_scene\":%s,\"surface\":%d}}",
 				distance, targetTolerance, hit.x, hit.y, hit.z, hitDistance,
 				hitDistance / distance, inst->m_id, inst->m_objectId,
 				jsonEscape(object ? object->m_name : "").c_str(),
-				isAgentSceneInstance(inst) ? "true" : "false");
+				isAgentSceneInstance(inst) ? "true" : "false", surface);
 			writeResponse(requestId, true, body);
 		}else{
 			char body[256];
@@ -2394,7 +2533,28 @@ AgentBridgeCaptureAfterWorldRender(void)
 {
 	if(!gAgentCapturePending || Scene.camera == nil || Scene.camera->frameBuffer == nil)
 		return;
+	if(gAgentCaptureDelayFrames > 0){
+		gAgentCaptureDelayFrames--;
+		return;
+	}
 	rw::Image *image = Scene.camera->frameBuffer->toImage();
+	std::string orthoInfo;
+	if(gAgentCaptureOrtho){
+		float halfW = gCameraOrthoHalfWidth, halfH = halfW / TheCamera.m_aspectRatio;
+		char info[512];
+		snprintf(info, sizeof(info),
+			",\"ortho\":{\"center\":[%.3f,%.3f],\"half_width\":%.4f,\"half_height\":%.4f,"
+			"\"meters_per_pixel\":%.6f,\"bounds\":[%.3f,%.3f,%.3f,%.3f],\"image\":[%d,%d]}",
+			gAgentCaptureOrthoCenter[0], gAgentCaptureOrthoCenter[1], halfW, halfH,
+			2.0f * halfW / sk::globals.width,
+			gAgentCaptureOrthoCenter[0] - halfW, gAgentCaptureOrthoCenter[1] - halfH,
+			gAgentCaptureOrthoCenter[0] + halfW, gAgentCaptureOrthoCenter[1] + halfH,
+			sk::globals.width, sk::globals.height);
+		orthoInfo = info;
+		gCameraOrtho = false;
+		TheCamera.m_LODmult = gAgentCaptureSavedLodMult;
+		gAgentCaptureOrtho = false;
+	}
 	bool captured = image != nil;
 	if(image != nil){
 		rw::writePNG(image, gAgentCapturePath);
@@ -2416,7 +2576,7 @@ AgentBridgeCaptureAfterWorldRender(void)
 		"\",\"actual_pose\":" + cameraPoseJson(gAgentCapturePose) +
 		",\"capture_camera_revision\":" + std::to_string(gAgentCaptureCameraRevision) +
 		",\"camera_revision\":" + std::to_string(gAgentCameraRevision) +
-		",\"restored\":" + (restored ? "true" : "false");
+		",\"restored\":" + (restored ? "true" : "false") + orthoInfo;
 	if(captured)
 		writeResponse(gAgentPendingRequestId, true, body);
 	else

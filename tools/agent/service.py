@@ -1271,6 +1271,7 @@ class ArianeService:
 			},
 			"camera": self.engine("camera_context")["camera"],
 			"objects": objects,
+			"suppressed": self.suppression_journal(),
 		}
 		manifest["project"] = self.vibe.project()
 		if session.get("active"):
@@ -1300,7 +1301,8 @@ class ArianeService:
 					os.close(directory_fd)
 		finally:
 			temporary.unlink(missing_ok=True)
-		return {"checkpoint": name, "path": str(target), "object_count": len(objects)}
+		return {"checkpoint": name, "path": str(target), "object_count": len(objects),
+		        "suppressed_count": len(manifest["suppressed"])}
 
 	def checkpoint_restore(self, name: str) -> dict:
 		name = self._safe_checkpoint_name(name)
@@ -1336,7 +1338,8 @@ class ArianeService:
 		self._save_composition(self._composition_path(session), state)
 		if "project" in manifest:
 			self.vibe.update_project({k: v for k, v in manifest["project"].items() if k not in {"revision", "schema"}})
-		return {"checkpoint": name, "restored_count": len(mapping), "objects": mapping}
+		suppressions = self.reapply_suppressions(manifest.get("suppressed", []))
+		return {"checkpoint": name, "restored_count": len(mapping), "suppressions": suppressions, "objects": mapping}
 
 	def validate_semantic_zones(self, zones: list[dict], objects: list[dict] | None = None) -> dict:
 		"""Oriented collision-footprint checks for explicit routes; not a navmesh."""
@@ -1397,7 +1400,44 @@ class ArianeService:
 					raise ValueError("native suppression would affect a locked object")
 			offset = page["page"]["next_offset"]
 			if offset is None: break
-		return self.engine("suppress_world_models", [x, y, radius, *model_ids])
+		result = self.engine("suppress_world_models", [x, y, radius, *model_ids])
+		self._journal_suppressions(result.get("suppressed", []))
+		return result
+
+	# World-model suppressions live only in the running editor; keep a journal so
+	# checkpoints can carry them and a restore can re-apply them after a restart.
+	@property
+	def suppression_journal_path(self) -> Path:
+		return self.state_dir / "suppressions.json"
+
+	def suppression_journal(self) -> list[dict]:
+		try:
+			return json.loads(self.suppression_journal_path.read_text(encoding="utf-8"))
+		except (OSError, ValueError):
+			return []
+
+	def _journal_suppressions(self, items: list[dict]) -> None:
+		journal = self.suppression_journal()
+		seen = {(e["model_id"], round(e["position"][0], 1), round(e["position"][1], 1)) for e in journal}
+		for item in items:
+			key = (item["model_id"], round(item["position"][0], 1), round(item["position"][1], 1))
+			if key not in seen:
+				seen.add(key)
+				journal.append({"model_id": item["model_id"], "position": item["position"]})
+		self.state_dir.mkdir(parents=True, exist_ok=True)
+		self.suppression_journal_path.write_text(json.dumps(journal, indent=1), encoding="utf-8")
+
+	def reapply_suppressions(self, entries: list[dict] | None = None) -> dict:
+		entries = self.suppression_journal() if entries is None else entries
+		applied = missing = 0
+		for e in entries:
+			x, y = e["position"][:2]
+			r = self.engine("suppress_world_models", [x, y, 0.75, e["model_id"]])
+			if r.get("suppressed_count", 0): applied += 1
+			else: missing += 1          # already suppressed (or no longer there)
+		if entries:
+			self._journal_suppressions([{"model_id": e["model_id"], "position": e["position"]} for e in entries])
+		return {"reapplied": applied, "already_or_missing": missing}
 
 	def dispatch(self, method: str, params: dict | None = None) -> Any:
 		params = params or {}

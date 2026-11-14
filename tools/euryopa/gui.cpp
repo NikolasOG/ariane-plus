@@ -6457,8 +6457,10 @@ saveSaveSettings(void)
 	fprintf(f, "day_night_balance %.9g\n", gDayNightBalance);
 	fprintf(f, "wet_road_effect %.9g\n", gWetRoadEffect);
 	fprintf(f, "neo_light_map_strength %.9g\n", gNeoLightMapStrength);
-	fprintf(f, "camera_position %.9g %.9g %.9g\n", TheCamera.m_position.x, TheCamera.m_position.y, TheCamera.m_position.z);
-	fprintf(f, "camera_target %.9g %.9g %.9g\n", TheCamera.m_target.x, TheCamera.m_target.y, TheCamera.m_target.z);
+	if(!gCameraOrtho){	// never persist an agent top-down capture pose
+		fprintf(f, "camera_position %.9g %.9g %.9g\n", TheCamera.m_position.x, TheCamera.m_position.y, TheCamera.m_position.z);
+		fprintf(f, "camera_target %.9g %.9g %.9g\n", TheCamera.m_target.x, TheCamera.m_target.y, TheCamera.m_target.z);
+	}
 	fprintf(f, "camera_fov %.9g\n", TheCamera.m_fov);
 	fprintf(f, "draw_target %d\n", gDrawTarget ? 1 : 0);
 	fprintf(f, "selection_highlight_opacity %d\n", gSelectionHighlightOpacity);

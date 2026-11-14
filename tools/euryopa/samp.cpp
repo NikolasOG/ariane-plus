@@ -910,6 +910,35 @@ DoSyncToServer(bool force)
 	return true;
 }
 
+// Agent bridge entry point: sync without UI popups; returns false + message on refusal
+bool
+SampAgentSync(const char *mapName, bool force, int *objects, int *removals, char *message, size_t messageSize)
+{
+	LoadSettings();
+	if(mapName && mapName[0]){
+		strncpy(gSampMapName, mapName, sizeof(gSampMapName) - 1);
+		gSampMapName[sizeof(gSampMapName) - 1] = '\0';
+		SaveSettings();
+	}
+	ExportLists l;
+	CollectExport(&l);
+	*objects = (int)l.objects.size();
+	*removals = (int)l.removals.size();
+	if(gSampServerDir[0] == '\0'){
+		snprintf(message, messageSize, "no server folder set (SA-MP > Server folder...)");
+		return false;
+	}
+	if(!force && l.objects.empty() && l.removals.empty() && LiveFileEntries() > 0){
+		snprintf(message, messageSize, "refusing to sync an empty layer over the server's map (pass force)");
+		return false;
+	}
+	bool ok = DoSyncToServer(true);
+	char path[1200];
+	LiveFilePath(path, sizeof(path));
+	snprintf(message, messageSize, ok ? "synced map '%s' to %s" : "sync failed for map '%s' (%s)", gSampMapName, path);
+	return ok;
+}
+
 // ------------------------------------------------------------------ UI
 
 #ifdef _WIN32
