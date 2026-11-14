@@ -283,6 +283,12 @@ static bool
 SetEditorWorkingDirectory(void)
 {
 #ifdef _WIN32
+	// SA-MP edition: ARIANE_GAME_DIR points at a GTA folder, so the editor
+	// can live outside the game install (settings stay next to the exe).
+	char gameDir[1024];
+	DWORD n = GetEnvironmentVariableA("ARIANE_GAME_DIR", gameDir, sizeof(gameDir));
+	if(n > 0 && n < sizeof(gameDir) && SetCurrentDirectoryA(gameDir))
+		return true;
 	char rootDir[1024];
 	return GetEditorRootDirectory(rootDir, sizeof(rootDir)) &&
 	       SetCurrentDirectoryA(rootDir) != 0;
@@ -821,8 +827,9 @@ InitRW(void)
 
 	RenderInit();
 
-	UpdaterCheckForUpdate();
-	TelemetrySendPing();
+	// SA-MP edition: no upstream auto-update (it would replace this fork with a
+	// stock build) and no telemetry pings to the upstream author's server.
+	// (Upstream has no telemetry toggle UI any more, so telemetry stays off.)
 
 	return true;
 }

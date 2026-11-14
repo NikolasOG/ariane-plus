@@ -545,6 +545,21 @@ rw::Texture *GetPrefabThumbnailTexture(const char *path);
 extern rw::Texture *gPreviewTexture;
 void HandleCustomImportDrop(const char *path);
 
+// SA-MP edition (samp.cpp)
+extern bool gSampProtectGameFiles;
+GameFile *SampGetLayerFile(void);
+bool SampIsLayerFile(const char *name);
+bool SampIsLayerInst(ObjectInst *inst);
+bool SampModeActive(void);
+bool SampBlockGameSave(const char *action);
+bool SampCanImport(const char *path);
+int SampImportFile(const char *path);
+bool SampSyncToServer(void);
+void SampMenu(void);
+void SampPopups(void);
+void SampLoadDefinitions(void);
+bool SampModelsLoaded(void);
+
 // Game Data structures
 
 void AddCdImage(const char *path);

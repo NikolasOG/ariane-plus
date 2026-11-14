@@ -14,7 +14,7 @@
 #define TELEMETRY_HOST L"gtastuff.namecdsl.xyz"
 #define TELEMETRY_PATH L"/ariane/telemetry/ping"
 
-static bool gTelemetryEnabled = true;
+static bool gTelemetryEnabled = false;	// SA-MP edition: opt-in
 static bool gTelemetrySettingsLoaded = false;
 
 static bool
@@ -50,7 +50,7 @@ LoadTelemetrySettings(void)
 	int value;
 
 	gTelemetrySettingsLoaded = true;
-	gTelemetryEnabled = true;
+	gTelemetryEnabled = false;	// SA-MP edition: opt-in
 
 	if(!GetTelemetrySettingsPath(path, sizeof(path)))
 		return false;

@@ -1031,6 +1031,7 @@ LoadLevel(const char *filename)
 		}else if(strncmp(line, "IPL", 3) == 0){
 			if(!haveFinishedDefinitions){
 				LoadModloaderDefinitionAdditions();
+				SampLoadDefinitions();	// SA-MP edition: SAMP/*.ide + *.img
 				InitCdImages();
 				LoadAllCollisions();
 				haveFinishedDefinitions = true;
@@ -1880,6 +1881,10 @@ SaveScene(const char *filename)
 	ObjectInst *inst;
 	BinaryIplSaveResult result = {};
 
+	// SA-MP edition: the SA-MP layer is never written as a game IPL
+	if(SampIsLayerFile(filename))
+		return result;
+
 	// Collect all instances belonging to this file
 	int numInsts = 0;
 	ObjectInst *fileInsts[8096];
@@ -2456,6 +2461,9 @@ BinaryIplSaveResult
 SaveBinaryIpls(const int32 *skipImages, int numSkipImages)
 {
 	BinaryIplSaveResult result = {};
+	// SA-MP edition: never touch streamed IPLs while SA-MP mode protects game files
+	if(SampModeActive())
+		return result;
 	int numDeleted = 0, numMoved = 0;
 	int32 imagesToProcess[256];
 	int numImagesToProcess = 0;

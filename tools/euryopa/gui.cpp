@@ -1699,6 +1699,8 @@ removeLegacyWholeMapOverrides(void)
 static bool
 saveAllIpls(const char *onlyScene = nil)
 {
+	if(SampBlockGameSave("Save"))
+		return false;
 	if(warnStreamingBinarySaveBlockedByRunningGame("Save"))
 		return false;
 	if(warnModloaderExportShadowedBeforeSave("Save"))
@@ -1726,7 +1728,7 @@ saveAllIpls(const char *onlyScene = nil)
 
 	for(p = instances.first; p; p = p->next){
 		ObjectInst *inst = (ObjectInst*)p->item;
-		if(inst->m_file == nil)
+		if(inst->m_file == nil || SampIsLayerInst(inst))
 			continue;
 		if(onlyScene)
 			continue;
@@ -2004,6 +2006,8 @@ publishHotReloadOutput(FILE *f, const char *tempPath, const char *finalPath)
 static void
 hotReloadIpls(void)
 {
+	if(SampBlockGameSave("Hot Reload"))
+		return;
 	if(IsIplMapDocumentExternal()){
 		ToastFor(TOAST_SAVE, 6.0f,
 		         "Hot Reload is unavailable: this external IPL is not installed or registered in the game.");
@@ -3783,6 +3787,10 @@ HandleCustomImportDrop(const char *path)
 {
 	if(path == nil)
 		return;
+	if(SampCanImport(path)){
+		SampImportFile(path);
+		return;
+	}
 	if(pathHasExtensionCi(path, ".dff") ||
 	   pathHasExtensionCi(path, ".txd") ||
 	   pathHasExtensionCi(path, ".col"))
@@ -3930,6 +3938,7 @@ uiMainmenu(void)
 			}
 			ImGui::EndMenu();
 		}
+		SampMenu();
 
 		if(IsIplMapDocumentOpen()){
 			ImGui::Separator();
@@ -3990,6 +3999,7 @@ uiMainmenu(void)
 	uiImportPrefabPopup();
 	uiCustomImportPopup();
 	uiReloadGamePopup();
+	SampPopups();
 }
 
 static void

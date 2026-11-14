@@ -1248,6 +1248,9 @@ GetLodForObject(int id)
 GameFile*
 GetOrCreateCurrentPlacementIplFile(void)
 {
+	// SA-MP edition: new objects belong to the SA-MP layer, not a game IPL
+	if(SampModeActive())
+		return SampGetLayerFile();
 	if(customIplFile)
 		return customIplFile;
 	char path[256];
