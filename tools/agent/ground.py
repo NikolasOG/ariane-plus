@@ -63,7 +63,8 @@ def surface_class(name: str) -> str:
 	if n == "DIRTTRACK": return "track"
 	if n in ("DIRT", "MUD_DRY", "MUD_WET", "WASTEGROUND", "GRAVEL"): return "dirt"
 	if n.startswith("SAND"): return "sand"
-	if n.startswith("TARMAC") or n in ("DEFAULT",): return "road"
+	if n.startswith("TARMAC"): return "road"
+	if n == "DEFAULT": return "other"           # generic surface (lots, pavements, roofs): not a road
 	if n.startswith("PAVEMENT") or n in ("PAINTED_GROUND", "FUCKED_CONCRETE", "CONCRETE_BEACH"): return "pavement"
 	if "GRASS" in n or n in ("MEADOW", "FLOWERBED", "WOODLANDGROUND", "VEGETATION", "HEDGE", "CORNFIELD"): return "grass"
 	if n.startswith("ROCK") or n == "STEEP_CLIFF": return "rock"

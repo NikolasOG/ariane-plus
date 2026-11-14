@@ -14,6 +14,8 @@ Site file (JSON):
    "track_ok_models": [1423, 976, 988],       # may stand on a track (gate leaves, barriers)
    "ignore_models": [19632, 1463],            # tiny decor
    "shelter_models": [3414, 3418],            # roofs props may stand under
+   "debris_models": [879, 880, 3097, ...],    # rubble / broken walls / ruins that may pile into each other
+   "floor_models": [18981],                   # ground slabs (tilted flat) others stand on
    "scan": "scan.json",                       # ground scan (track + road masks)
    "bbox": [x0, y0, x1, y1]}                  # area to lint (default: perimeter bounds + 20 m)
 
@@ -117,6 +119,8 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	ignore = set(site.get("ignore_models", [19632, 1463]))
 	shelters = set(site.get("shelter_models", [3414, 3418, 3861, 3862, 3863, 19129, 3626]))
 	track_ok = set(site.get("track_ok_models", [1423, 976, 988, 969, 975]))
+	debris = set(site.get("debris_models", []))       # rubble / broken walls / ruins: may pile into each other
+	floors = set(site.get("floor_models", [18981]))   # ground slabs (often tilted flat): others stand on them
 	perimeter = [tuple(p) for p in site.get("perimeter", [])]
 	gates = site.get("gates", [])
 	fixed_zones = [[tuple(p) for p in z] for z in site.get("fixed_zones", [])]
@@ -232,6 +236,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 		for b in objs[i + 1:]:
 			if b["m"] in ignore or abs(a["x"] - b["x"]) > 30 or abs(a["y"] - b["y"]) > 30: continue
 			if (id(a) in wall_ids and id(b) in wall_ids) or a["m"] in shelters or b["m"] in shelters: continue
+			if a["m"] in floors or b["m"] in floors or (a["m"] in debris and b["m"] in debris): continue
 			if a["z"] >= b["ztop"] - 0.3 or b["z"] >= a["ztop"] - 0.3: continue
 			if not _sat(a["q"], b["q"]): continue
 			big, small = (a, b) if a["a"] >= b["a"] else (b, a)
@@ -245,7 +250,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	# 4. world clashes
 	for w in world:
 		for o in objs:
-			if o["a"] < 1.0 or abs(o["x"] - w["x"]) > 30 or abs(o["y"] - w["y"]) > 30: continue
+			if o["a"] < 1.0 or o["m"] in floors or abs(o["x"] - w["x"]) > 30 or abs(o["y"] - w["y"]) > 30: continue
 			if _sat(o["q"], w["q"]):
 				ov = _inter_area(o["q"], w["q"])
 				if ov > 0.3:
@@ -254,7 +259,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	# 4b. tree trunks / poles standing inside placed objects
 	for t in trunks:
 		for o in objs:
-			if o["a"] >= 1.0 and abs(o["x"] - t["x"]) < 20 and abs(o["y"] - t["y"]) < 20 and _pip(t["x"], t["y"], shrink(o["q"], 0.1)):
+			if o["a"] >= 1.0 and o["m"] not in floors and abs(o["x"] - t["x"]) < 20 and abs(o["y"] - t["y"]) < 20 and _pip(t["x"], t["y"], shrink(o["q"], 0.1)):
 				issue(t["kind"], "world %s (model %d) stands inside %s - suppress it or move the object" % (t["name"], t["model"], o["name"]),
 				      t["x"], t["y"], [o["id"]])
 				break
@@ -271,12 +276,22 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 		roads = ground.TrackMask(data, road_names, min_cells=30) if road_names else None
 		structures = ground.StructureMask(data)
 		for o in objs:
-			if id(o) in wall_ids or id(o) in riders or o["m"] in track_ok: continue
+			if id(o) in wall_ids or id(o) in riders or o["m"] in track_ok or o["m"] in floors: continue
 			if perimeter and not _pip(o["x"], o["y"], perimeter) and perim_dist(o["x"], o["y"]) > 3:
 				pass
 			hits = tracks.footprint_hits(o["q"], margin=-0.25)
 			if hits >= max(1, int(0.15 * o["a"])) or (o["a"] < 1.5 and tracks.on_track(o["x"], o["y"])):
 				issue("track", "%s is on a dirt track (%d m2)" % (o["name"], hits), o["x"], o["y"], [o["id"]])
+			# perched: standing on a world model (roof, fence, wall) instead of the ground
+			if id(o) not in riders and o["m"] not in track_ok and o["m"] not in floors:
+				c = int(round((o["x"] - data["origin"][0]) / data["step"])); r = int(round((o["y"] - data["origin"][1]) / data["step"]))
+				if 0 <= c < data["nx"] and 0 <= r < data["ny"]:
+					gz = data["ground_z"][r * data["nx"] + c]; tm = data["top_model"][r * data["nx"] + c]
+					if gz is not None and o["z"] - gz > 0.8 and not any(
+							w is not o and abs(w["x"] - o["x"]) < 12 and abs(w["y"] - o["y"]) < 12 and o["z"] >= w["ztop"] - 0.4
+							and _ppdist(o["x"], o["y"], w["q"]) <= 0.6 for w in objs):
+						issue("perched", "%s stands %.1f m above the ground, on world model %s" % (o["name"], o["z"] - gz, tm),
+						      o["x"], o["y"], [o["id"]])
 			if o["a"] >= 3.0 and id(o) not in riders:
 				built = structures.footprint_hits(o["q"], margin=-0.4)
 				if built * data["step"] ** 2 >= 1.0:

@@ -1675,7 +1675,34 @@ handleRequest(const std::vector<std::string> &lines)
 			inst->m_isDeleted = true;
 			inst->Deselect();
 		}
-		suppressed += "],\"suppressed_count\":" + std::to_string(targets.size());
+		// A removed building's LOD would keep showing the intact building from
+		// far away: suppress LODs whose high-detail children are now all gone.
+		int lodCount = 0;
+		for(size_t i = 0; i < targets.size(); i++){
+			ObjectInst *lod = targets[i]->m_lod;
+			if(lod == nil || lod->m_isDeleted || isAgentSceneInstance(lod))
+				continue;
+			bool childLeft = false;
+			for(CPtrNode *p = instances.first; p && !childLeft; p = p->next){
+				ObjectInst *other = (ObjectInst*)p->item;
+				if(other->m_lod == lod && !other->m_isDeleted)
+					childLeft = true;
+			}
+			if(childLeft)
+				continue;
+			if(captured.insert(lod->m_id).second)
+				gAgentScopedWorldSnapshot.push_back({ lod->m_id, lod->m_translation,
+					lod->m_rotation, lod->m_isDeleted });
+			char item[256];
+			snprintf(item, sizeof(item),
+				",{\"instance_id\":%d,\"model_id\":%d,\"position\":[%.3f,%.3f,%.3f],\"lod\":true}",
+				lod->m_id, lod->m_objectId, lod->m_translation.x, lod->m_translation.y, lod->m_translation.z);
+			if(targets.empty() || suppressed.back() == '[') suppressed += item + 1; else suppressed += item;
+			lod->m_isDeleted = true;
+			lodCount++;
+		}
+		suppressed += "],\"suppressed_count\":" + std::to_string(targets.size()) +
+			",\"lods_suppressed\":" + std::to_string(lodCount);
 		gAgentSceneRevision++;
 		writeResponse(requestId, true, suppressed);
 		return;

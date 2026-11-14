@@ -102,7 +102,12 @@ def save_prefab(service, name: str, instance_ids: list[int], origin: tuple[float
 	return {"ok": True, "path": str(path), "parts": len(parts), "stacked": sum(p["on"] is not None for p in parts)}
 
 
-def place_prefab(service, prefab: dict, x: float, y: float, heading: float, *, snap: bool = True) -> dict:
+def place_prefab(service, prefab: dict, x: float, y: float, heading: float, *, snap: bool = True,
+                 base_z: float | None = None) -> dict:
+	"""base_z: put ground parts with their bottom exactly at this height instead of
+	snapping (snapping only finds world ground, not placed slabs/floors)."""
+	if base_z is not None:
+		snap = False
 	h = math.radians(heading); c, s = math.cos(h), math.sin(h)
 	parts = prefab["parts"]
 	tag = uuid.uuid4().hex[:8]
@@ -113,8 +118,12 @@ def place_prefab(service, prefab: dict, x: float, y: float, heading: float, *, s
 	ops = []
 	for i in ground:
 		wx, wy, wh = world(parts[i])
+		z = parts[i].get("z", 0.0)
+		if base_z is not None:
+			b = service.probe_asset(parts[i]["model"], ensure_renderable=True).get("collision_bounds")
+			z = base_z - (b[0][2] if b else 0.0) + 0.02
 		ops.append({"action": "place", "key": keys[i], "model": parts[i]["model"], "x": wx, "y": wy,
-		            "z": parts[i].get("z", 0.0), "heading": wh, "snap": snap})
+		            "z": z, "heading": wh, "snap": snap})
 	service.apply_scene_patch(ops)
 	placed = {}
 	by_key = {}

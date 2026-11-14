@@ -203,6 +203,25 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	pplace = prefab_sub.add_parser("place"); pplace.add_argument("name", help="saved name or a .json path")
 	for n in ("x", "y", "heading"): pplace.add_argument(n, type=float)
 	pplace.add_argument("--no-snap", action="store_true")
+	pplace.add_argument("--base-z", type=float, help="put ground parts at this height (e.g. on a slab) instead of snapping")
+	rep = sub.add_parser("replace-building",
+		help="Remove the world building at x,y (and its LOD) and place another model at the same transform")
+	rep.add_argument("x", type=float); rep.add_argument("y", type=float); rep.add_argument("model", type=int)
+	rep.add_argument("--old-model", type=int, help="only match this world model")
+	rep.add_argument("--heading-offset", type=float, default=0.0)
+	rep.add_argument("--dx", type=float, default=0.0, help="offset along the old building's local X")
+	rep.add_argument("--dy", type=float, default=0.0)
+	rep.add_argument("--dz", type=float, help="fixed height offset (default: snap to ground)")
+	rep.add_argument("--keep-old", action="store_true", help="place the model without removing the building")
+	fac = sub.add_parser("facade", help="Line one side of the world building at x,y with a model (scaffolding, rubble...)")
+	fac.add_argument("x", type=float); fac.add_argument("y", type=float); fac.add_argument("model", type=int)
+	fac.add_argument("--side", default="auto", help="auto (faces the road / open space), N/S/E/W or 0-3")
+	fac.add_argument("--spacing", type=float); fac.add_argument("--offset", type=float, default=0.8)
+	fac.add_argument("--levels", default="auto", help="'auto' = up to the building height, or a number")
+	fac.add_argument("--level-height", type=float); fac.add_argument("--heading-offset", type=float, default=0.0)
+	fac.add_argument("--margin", type=float, default=1.0); fac.add_argument("--max-levels", type=int, default=6)
+	fac.add_argument("--scan", type=Path, help="ground scan: 'auto' side faces the nearest road")
+	fac.add_argument("--building-model", type=int, help="only match this world model")
 	lintp = sub.add_parser("lint", help="Check a site: wall gaps, overlaps, world clashes, objects on tracks / roads")
 	lintp.add_argument("--site", type=Path, required=True, help="site JSON (perimeter, gates, scan...)")
 	lintp.add_argument("--json", type=Path, help="write the issue list here")
@@ -360,6 +379,10 @@ def main(argv: list[str] | None = None) -> int:
 	search.add_argument("--max-depth", type=float); search.add_argument("--has-collision", action="store_true")
 	search.add_argument("--include-lod", action="store_true"); search.add_argument("--limit", type=int, default=30)
 	search.add_argument("--include-hazards", action="store_true", help="also return explosive props (hidden by default)")
+	smatch = asset_sub.add_parser("size-match", help="Models with a similar footprint (e.g. a ruin to replace a building)")
+	smatch.add_argument("width", type=float); smatch.add_argument("depth", type=float)
+	smatch.add_argument("--query", default=""); smatch.add_argument("--tolerance", type=float, default=0.25)
+	smatch.add_argument("--limit", type=int, default=20)
 	hazards = asset_sub.add_parser("mark-hazards", help="Tag explosive / breakable / dynamic assets from data/object.dat")
 	hazards.add_argument("--game-dir", help="default: ARIANE_GAME_DIR")
 	search.add_argument("--defined-only", action="store_true",
@@ -478,6 +501,13 @@ def main(argv: list[str] | None = None) -> int:
 						args.query, category=args.category, max_width=args.max_width,
 						max_depth=args.max_depth, has_collision=True if args.has_collision else None,
 						exclude_lod=not args.include_lod, limit=args.limit, include_hazards=args.include_hazards)}
+			elif args.asset_command == "size-match":
+				if __package__:
+					from . import building_tools as bt
+				else:
+					import building_tools as bt
+				payload = {"assets": bt.size_match(AssetIndex(args.db), args.width, args.depth, query=args.query,
+				                                   tolerance=args.tolerance, limit=args.limit)}
 			elif args.asset_command == "mark-hazards":
 				import os
 				game_dir = args.game_dir or os.environ.get("ARIANE_GAME_DIR")
@@ -566,6 +596,26 @@ def main(argv: list[str] | None = None) -> int:
 			elif args.checkpoint_command == "list": payload = checkpoint_service.checkpoint_list()
 			elif args.checkpoint_command == "save": payload = checkpoint_service.checkpoint_save(args.name)
 			else: payload = checkpoint_service.checkpoint_restore(args.name)
+		elif args.command in {"replace-building", "facade"}:
+			if __package__:
+				from . import building_tools as bt, ground
+			else:
+				import building_tools as bt, ground
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			if args.command == "replace-building":
+				payload = bt.replace_building(service, args.x, args.y, args.model, old_model=args.old_model,
+				                              heading_offset=args.heading_offset, dx=args.dx, dy=args.dy, dz=args.dz,
+				                              keep_old=args.keep_old)
+			else:
+				mask = None
+				if args.scan:
+					data = ground.load(args.scan)
+					names = [n.upper() for n in data["surface_names"]]
+					mask = ground.TrackMask(data, tuple(n for n in names if ground.surface_class(n) == "road"), min_cells=20)
+				payload = bt.facade(service, args.x, args.y, args.model, side=args.side, spacing=args.spacing,
+				                    offset=args.offset, levels=int(args.levels) if str(args.levels).isdigit() else "auto",
+				                    level_height=args.level_height, heading_offset=args.heading_offset, margin=args.margin,
+				                    max_levels=args.max_levels, road_mask=mask, building_model=args.building_model)
 		elif args.command == "lint":
 			if __package__:
 				from . import lint as lint_mod
@@ -596,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
 				payload = prefabs.save_prefab(service, args.name, args.ids, tuple(args.origin) if args.origin else None, args.notes)
 			else:
 				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
-				                               args.heading, snap=not args.no_snap)
+				                               args.heading, snap=not args.no_snap, base_z=args.base_z)
 		elif args.command in {"ground-scan", "track-mask", "capture-ortho", "samp-sync"}:
 			if __package__:
 				from . import ground
