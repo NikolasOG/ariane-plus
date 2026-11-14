@@ -28,6 +28,8 @@ SA-MP / open.mp server without ever touching your game's IPL files.
   **Move a stock building** → exported as remove + a copy at the new spot.
 - **Export Pawn…** — custom helpers (`Map_CreateObject` / `Map_RemoveBuilding`), streamer
   (`CreateDynamicObject`) or native (`CreateObject`).
+- **Reload from server** — rebuild the layer from what the server runs now. Ariane does this
+  automatically on start, and asks before a sync would wipe a non-empty server map.
 - **Server folder…** then **Sync to server** — writes `scriptfiles/ariane_live.txt` (the
   custom gamemode picks it up within ~3 s) and, optionally,
   `gamemodes/wasteland/maps/<name>.inc`.
