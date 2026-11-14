@@ -2601,6 +2601,10 @@ updateFPS(void)
 	avgTimeStep = total / n;
 }
 
+#ifdef RW_D3D9
+namespace rw { namespace d3d { bool32 deviceReady(void); } }
+#endif
+
 void
 Draw(void)
 {
@@ -2611,6 +2615,17 @@ Draw(void)
 		sk::globals.quit = 1;
 		return;
 	}
+
+#ifdef RW_D3D9
+	// SA-MP edition: while another fullscreen app (GTA) owns the display the
+	// D3D9 device is lost and its render targets are released - drawing now
+	// would touch freed resources. Skip the whole frame (UI, agent and all)
+	// until the device has been reset.
+	if(!rw::d3d::deviceReady()){
+		Sleep(50);
+		return;
+	}
+#endif
 
 	// HACK: we load a lot in the first frame
 	// which messes up the average
