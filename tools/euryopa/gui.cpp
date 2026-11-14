@@ -7790,6 +7790,14 @@ uiBrowserSelectedObject(int selId)
 		if(ImGui::Button("Favourite"))
 			ToggleFavourite(selId);
 	}
+	ImGui::SameLine();
+	if(ImGui::Button("Deselect")){
+		if(gPlaceMode) SpawnExitPlaceMode();
+		if(gBrushMode) ExitBrushMode();
+		if(gPrefabPlaceMode) ExitPrefabPlaceMode();
+		ClearSpawnObject();
+	}
+	ImGui::SetItemTooltip("Clear the selected object (hides this panel)");
 	ImGui::Separator();
 }
 

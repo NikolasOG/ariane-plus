@@ -516,6 +516,7 @@ int SpawnPlaceObjectNoUndo(rw::V3d position, const rw::Quat *orientation,
 void SpawnExitPlaceMode(void);
 int GetSpawnObjectId(void);
 void SetSpawnObjectId(int id);
+void ClearSpawnObject(void);
 void SetCustomPlacementIpl(const char *logicalPath, const char *sourcePath, bool addToDat);
 GameFile *GetOrCreateCurrentPlacementIplFile(void);
 int GetLodForObject(int id);

@@ -1230,6 +1230,14 @@ SetSpawnObjectId(int id)
 		SetCustomPlacementIpl(DEFAULT_CUSTOM_IPL_PATH, nil, true);
 }
 
+// SA-MP edition: clear the Object Browser selection (no model armed for placing).
+// Bypasses SetSpawnObjectId so the placement IPL target isn't touched.
+void
+ClearSpawnObject(void)
+{
+	spawnObjectId = -1;
+}
+
 int
 GetLodForObject(int id)
 {
