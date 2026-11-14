@@ -191,15 +191,46 @@ debug(const char *fmt, ...)
 }
 
 // TODO: do something fancy
+// SA-MP edition: also keep the log in ariane.log next to the exe (truncated on
+// start) - a windowed app launched from Explorer has no stdout to read.
+static FILE*
+logFile(void)
+{
+	static FILE *f = nil;
+	static bool tried = false;
+	if(!tried){
+		tried = true;
+#ifdef _WIN32
+		char path[MAX_PATH];
+		DWORD n = GetModuleFileNameA(nil, path, sizeof(path));
+		char *slash = n > 0 && n < sizeof(path) ? strrchr(path, '\\') : nil;
+		if(slash){
+			strcpy(slash + 1, "ariane.log");
+			f = fopen(path, "w");
+		}
+#endif
+	}
+	return f;
+}
+
 void
 log(const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
 	vfprintf(stdout, fmt, ap);
-	addToLogWindow(fmt, ap);
-	fflush(stdout);
 	va_end(ap);
+	va_start(ap, fmt);
+	addToLogWindow(fmt, ap);
+	va_end(ap);
+	FILE *lf = logFile();
+	if(lf){
+		va_start(ap, fmt);
+		vfprintf(lf, fmt, ap);
+		va_end(ap);
+		fflush(lf);
+	}
+	fflush(stdout);
 }
 
 bool
