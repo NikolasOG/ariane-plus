@@ -165,11 +165,18 @@ SampLoadDefinitions(void)
 	snprintf(path, sizeof(path), "%s\\custom.img", gSampModelDir);
 	if(GameFileExists(path))
 		AddCdImage(path);
+	// Tag the definitions with their own file so the Object Browser's IDE tab
+	// lists them as SAMP.ide, not as the last GTA IDE that was loaded.
+	static char sampIdeName[] = "SAMP\\SAMP.ide";
+	static char customIdeName[] = "SAMP\\CUSTOM.ide";
 	snprintf(path, sizeof(path), "%s\\SAMP.ide", gSampModelDir);
+	FileLoader::currentFile = NewGameFile(sampIdeName);
 	FileLoader::LoadObjectTypes(path);
 	snprintf(path, sizeof(path), "%s\\CUSTOM.ide", gSampModelDir);
-	if(GameFileExists(path))
+	if(GameFileExists(path)){
+		FileLoader::currentFile = NewGameFile(customIdeName);
 		FileLoader::LoadObjectTypes(path);
+	}
 	gSampModelsLoaded = true;
 	log("SA-MP: loaded SA-MP object definitions from %s\n", gSampModelDir);
 }

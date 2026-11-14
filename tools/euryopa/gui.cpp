@@ -7793,6 +7793,18 @@ uiBrowserSelectedObject(int selId)
 	ImGui::Separator();
 }
 
+// SA-MP edition: browser filters match the object ID as well as the name,
+// so typing "19632" finds SA-MP objects (whose names are things like FireWood1).
+static bool
+browserPassFilter(ImGuiTextFilter &filter, int id, const char *name)
+{
+	if(filter.PassFilter(name))
+		return true;
+	char idText[16];
+	snprintf(idText, sizeof(idText), "%d", id);
+	return filter.PassFilter(idText);
+}
+
 static void
 uiBrowserWindow(void)
 {
@@ -7853,7 +7865,7 @@ uiBrowserWindow(void)
 					if(cat < 0 || !isCategoryOrChild(cat, gBrowserSelectedCategory))
 						continue;
 				}
-				if(!gBrowserCategoryFilter.PassFilter(obj->m_name)) continue;
+				if(!browserPassFilter(gBrowserCategoryFilter, i, obj->m_name)) continue;
 				filtered[numFiltered++] = i;
 			}
 			ImGui::Text("%d objects", numFiltered);
@@ -7909,7 +7921,7 @@ uiBrowserWindow(void)
 				if(gBrowserSelectedIde[0] != '\0' &&
 				   (obj->m_file == nil || strcmp(obj->m_file->name, gBrowserSelectedIde) != 0))
 					continue;
-				if(!gBrowserIdeFilter.PassFilter(obj->m_name)) continue;
+				if(!browserPassFilter(gBrowserIdeFilter, i, obj->m_name)) continue;
 				filtered[numFiltered++] = i;
 			}
 			ImGui::Text("%d objects", numFiltered);
@@ -7934,7 +7946,7 @@ uiBrowserWindow(void)
 				for(int i = 0; i < NUMOBJECTDEFS; i++){
 					ObjectDef *obj = GetObjectDef(i);
 					if(obj == nil) continue;
-					if(!gBrowserSearchFilter.PassFilter(obj->m_name)) continue;
+					if(!browserPassFilter(gBrowserSearchFilter, i, obj->m_name)) continue;
 					filtered[numFiltered++] = i;
 				}
 			}
@@ -7957,7 +7969,7 @@ uiBrowserWindow(void)
 				if(!IsFavourite(i)) continue;
 				ObjectDef *obj = GetObjectDef(i);
 				if(obj == nil) continue;
-				if(!gBrowserFavFilter.PassFilter(obj->m_name)) continue;
+				if(!browserPassFilter(gBrowserFavFilter, i, obj->m_name)) continue;
 				filtered[numFiltered++] = i;
 			}
 			ImGui::Text("%d favourites", numFiltered);
