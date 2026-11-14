@@ -271,3 +271,20 @@ def _point_in_convex(px: float, py: float, quad, margin: float = 0.0) -> bool:
 		if (px - x1) * nx_ + (py - y1) * ny_ > margin:
 			return False
 	return True
+
+
+class StructureMask(TrackMask):
+	"""Cells where something solid stands well above the ground (buildings,
+	walls, big props): top hit more than ``min_height`` above the lowest hit.
+	Scans skip agent objects by default, so this is the world's buildings only."""
+
+	def __init__(self, data: dict, min_height: float = 2.5, min_cells: int = 4):
+		self.data = data
+		self.ox, self.oy = data["origin"]
+		self.step = data["step"]
+		self.nx, self.ny = data["nx"], data["ny"]
+		raw = []
+		for top, low in zip(data["top_z"], data["ground_z"]):
+			raw.append(top is not None and low is not None and top - low > min_height)
+		self.mask = self._drop_specks(raw, min_cells)
+		self.dist = self._distance_field()

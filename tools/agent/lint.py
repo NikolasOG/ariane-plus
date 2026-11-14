@@ -10,6 +10,7 @@ Site file (JSON):
    "gates": [{"x":..,"y":..,"half_cut":..}],  # openings in the wall line
    "wall_models": [2932, 2934, 2935, 19641],
    "fixed_zones": [[[x, y], ...], ...],       # e.g. an older compound: never auto-deleted
+   "ignore_zones": [[[x, y], ...], ...],      # areas linted by another site file
    "track_ok_models": [1423, 976, 988],       # may stand on a track (gate leaves, barriers)
    "ignore_models": [19632, 1463],            # tiny decor
    "shelter_models": [3414, 3418],            # roofs props may stand under
@@ -119,6 +120,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	perimeter = [tuple(p) for p in site.get("perimeter", [])]
 	gates = site.get("gates", [])
 	fixed_zones = [[tuple(p) for p in z] for z in site.get("fixed_zones", [])]
+	ignore_zones = [[tuple(p) for p in z] for z in site.get("ignore_zones", [])]   # linted elsewhere
 	if site.get("bbox"):
 		x0, y0, x1, y1 = site["bbox"]
 	elif perimeter:
@@ -144,6 +146,8 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	for it in service.enumerate_scene():
 		x, y, z = it["position"]
 		if not (x0 <= x <= x1 and y0 <= y <= y1) or str(it.get("name", "")).lower().startswith("lod"):
+			continue
+		if any(_pip(x, y, z) for z in ignore_zones):
 			continue
 		q, az, bz = quad(it["model_id"], x, y, it["rotation"][2])
 		objs.append({"id": it["instance_id"], "m": it["model_id"], "name": it.get("name", str(it["model_id"])),
@@ -265,6 +269,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 		names = [n.upper() for n in data["surface_names"]]
 		road_names = tuple(n for n in names if ground.surface_class(n) in ("road",))
 		roads = ground.TrackMask(data, road_names, min_cells=30) if road_names else None
+		structures = ground.StructureMask(data)
 		for o in objs:
 			if id(o) in wall_ids or id(o) in riders or o["m"] in track_ok: continue
 			if perimeter and not _pip(o["x"], o["y"], perimeter) and perim_dist(o["x"], o["y"]) > 3:
@@ -272,6 +277,11 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 			hits = tracks.footprint_hits(o["q"], margin=-0.25)
 			if hits >= max(1, int(0.15 * o["a"])) or (o["a"] < 1.5 and tracks.on_track(o["x"], o["y"])):
 				issue("track", "%s is on a dirt track (%d m2)" % (o["name"], hits), o["x"], o["y"], [o["id"]])
+			if o["a"] >= 3.0 and id(o) not in riders:
+				built = structures.footprint_hits(o["q"], margin=-0.4)
+				if built * data["step"] ** 2 >= 1.0:
+					issue("world", "%s runs into a world building (%.0f m2 under a roof/wall)" % (o["name"], built * data["step"] ** 2),
+					      o["x"], o["y"], [o["id"]])
 			if roads and roads.footprint_hits(o["q"], margin=0.3) > 0:
 				issue("road", "%s is on or against a road" % o["name"], o["x"], o["y"], [o["id"]])
 
