@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import struct
 from typing import Any
 from urllib.request import Request, urlopen
 
@@ -180,9 +181,12 @@ def _gta_models(gta_dir: Path) -> list[dict]:
 	if data is None:
 		raise FileNotFoundError(f"GTA data directory not found in {gta_dir}")
 	models = {}
-	for path in sorted(data.rglob("*")):
-		if path.suffix.lower() != ".ide":
-			continue
+	ide_paths = [p for p in sorted(data.rglob("*")) if p.suffix.lower() == ".ide"]
+	samp_dir = _samp_model_dir(gta_dir)
+	if samp_dir is not None:
+		ide_paths += sorted(p for p in samp_dir.iterdir() if p.suffix.lower() == ".ide")
+	for path in ide_paths:
+		is_samp = samp_dir is not None and path.parent == samp_dir
 		section = ""
 		for line_number, line in enumerate(path.read_text(encoding="latin-1").splitlines(), 1):
 			line = line.split("#", 1)[0].strip()
@@ -204,8 +208,9 @@ def _gta_models(gta_dir: Path) -> list[dict]:
 				else:
 					count = 1
 				models[asset_id] = {"id": asset_id, "name": fields[1], "dff": fields[1],
-					"txd": fields[2], "category": "lod" if fields[1].lower().startswith("lod") else "unknown",
-					"source": path.relative_to(gta_dir).as_posix(),
+					"txd": fields[2],
+					"category": "samp" if is_samp else ("lod" if fields[1].lower().startswith("lod") else "unknown"),
+					"source": ("samp/" + path.name) if is_samp else path.relative_to(gta_dir).as_posix(),
 					"drawDist": max(float(v) for v in fields[start:start + count]),
 					"flags": int(fields[start + count], 0)}
 			except (ValueError, IndexError) as exc:
@@ -215,6 +220,82 @@ def _gta_models(gta_dir: Path) -> list[dict]:
 	return list(models.values())
 
 
+def _samp_model_dir(gta_dir: Path) -> Path | None:
+	"""SA-MP's own object definitions (IDs 18631-19999): the game's SAMP folder,
+	ARIANE_SAMP_DIR, or the open.mp launcher's copy."""
+	candidates = []
+	if os.environ.get("ARIANE_SAMP_DIR"):
+		candidates.append(Path(os.environ["ARIANE_SAMP_DIR"]))
+	candidates += [p for p in gta_dir.iterdir() if p.is_dir() and p.name.lower() == "samp"]
+	if os.environ.get("LOCALAPPDATA"):
+		candidates.append(Path(os.environ["LOCALAPPDATA"]) / "mp.open.launcher" / "samp" / "shared" / "SAMP")
+	for candidate in candidates:
+		if candidate.is_dir() and any(p.name.lower() == "samp.ide" for p in candidate.iterdir()):
+			return candidate
+	return None
+
+
+def _img_col_bounds(img_path: Path) -> dict[str, tuple]:
+	"""Bounding boxes of every collision model in a VER2 IMG archive, by model name."""
+	bounds = {}
+	with img_path.open("rb") as handle:
+		if handle.read(4) != b"VER2":
+			return bounds
+		count = struct.unpack("<I", handle.read(4))[0]
+		entries = []
+		for _ in range(count):
+			offset, size, _, name = struct.unpack("<IHH24s", handle.read(32))
+			name = name.split(b"\0")[0].decode("latin-1").lower()
+			if name.endswith(".col"):
+				entries.append((offset * 2048, size * 2048))
+		for offset, size in entries:
+			handle.seek(offset)
+			data = handle.read(size)
+			pos = 0
+			while pos + 32 <= len(data) and data[pos:pos + 4] in (b"COLL", b"COL2", b"COL3", b"COL4"):
+				body = struct.unpack_from("<I", data, pos + 4)[0]
+				model = data[pos + 8:pos + 30].split(b"\0")[0].decode("latin-1").lower()
+				base = pos + 32
+				if data[pos:pos + 4] == b"COLL":	# radius, center, min, max
+					low, high = struct.unpack_from("<3f", data, base + 16), struct.unpack_from("<3f", data, base + 28)
+				else:					# min, max, center, radius
+					low, high = struct.unpack_from("<3f", data, base), struct.unpack_from("<3f", data, base + 12)
+				bounds[model] = (low, high)
+				pos += 8 + body
+	return bounds
+
+
+def _collision_sizes(gta_dir: Path, models: list[dict]) -> tuple[dict, dict]:
+	"""Dimensions from the game's (and SA-MP's) collision archives, keyed like gtastuff's model-sizes."""
+	archives = []
+	models_dir = next((p for p in gta_dir.iterdir() if p.is_dir() and p.name.lower() == "models"), None)
+	if models_dir is not None:
+		archives += [p for p in models_dir.iterdir() if p.suffix.lower() == ".img"]
+	samp_dir = _samp_model_dir(gta_dir)
+	if samp_dir is not None:
+		archives += [p for p in samp_dir.iterdir() if p.suffix.lower() == ".img"]
+	bounds = {}
+	for archive in archives:
+		try:
+			for name, box in _img_col_bounds(archive).items():
+				bounds.setdefault(name, box)
+		except (OSError, struct.error):
+			continue
+	sizes, collisions = {}, {}
+	for model in models:
+		box = bounds.get(str(model["name"]).lower())
+		if box is None:
+			continue
+		(x0, y0, z0), (x1, y1, z1) = box
+		width, depth, height = abs(x1 - x0), abs(y1 - y0), abs(z1 - z0)
+		key = str(model["id"])
+		sizes[key] = {"width": round(width, 3), "depth": round(depth, 3), "height": round(height, 3),
+			"maxDim": round(max(width, depth, height), 3), "volume": round(width * depth * height, 3),
+			"radius": round(0.5 * (width ** 2 + depth ** 2 + height ** 2) ** 0.5, 3)}
+		collisions[key] = True
+	return sizes, collisions
+
+
 def build_index(gtastuff: Path | None = DEFAULT_GTASTUFF, database: Path = DEFAULT_DATABASE,
 				semantic_assets: Path | None = None, *, gta_dir: Path | None = None) -> dict:
 	database = Path(database).expanduser().resolve()
@@ -222,7 +303,8 @@ def build_index(gtastuff: Path | None = DEFAULT_GTASTUFF, database: Path = DEFAU
 		gta_dir = Path(gta_dir).expanduser().resolve()
 		models = _gta_models(gta_dir)
 		models_path = gta_dir / "data"
-		sizes, locations, collisions, prineside = {}, {}, {}, {}
+		sizes, collisions = _collision_sizes(gta_dir, models)
+		locations, prineside = {}, {}
 	elif gtastuff is not None:
 		gtastuff = Path(gtastuff).expanduser().resolve()
 		models_path = gtastuff / "models" / "data" / "models.json"
