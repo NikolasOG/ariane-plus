@@ -645,6 +645,10 @@ CollectExport(ExportLists *out)
 		if(SampIsLayerInst(inst)){
 			if(inst->m_isDeleted)
 				continue;
+			// LOD companions Ariane adds for display: SA-MP objects have no LOD
+			// system, a LOD exported as an object would render doubled/flicker
+			if(inst->m_numChildren > 0)
+				continue;
 			inst->UpdateMatrix();
 			SampRawObject o;
 			o.model = inst->m_objectId;
@@ -930,7 +934,7 @@ CountLayer(int *removed)
 	int n = 0, r = 0;
 	for(CPtrNode *p = instances.first; p; p = p->next){
 		ObjectInst *inst = (ObjectInst*)p->item;
-		if(SampIsLayerInst(inst) && !inst->m_isDeleted) n++;
+		if(SampIsLayerInst(inst) && !inst->m_isDeleted && inst->m_numChildren == 0) n++;
 		else if(IsStockInst(inst) && inst->m_isDeleted) r++;
 	}
 	*removed = r + (int)gRawRemovals.size();
