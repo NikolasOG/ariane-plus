@@ -7581,7 +7581,7 @@ uiObjectGrid(int *filtered, int numFiltered, int selId)
 				ImVec2 imageMax = ImVec2(min.x + tileW - 10.0f, min.y + 104.0f);
 				rw::Texture *thumb = GetObjectThumbnailTexture(i);
 				if(thumb && thumb->raster){
-					drawList->AddImage((void*)(intptr_t)thumb, imageMin, imageMax, ImVec2(0, 1), ImVec2(1, 0));
+					drawList->AddImage((void*)(intptr_t)thumb, imageMin, imageMax, CAMTEX_UV0, CAMTEX_UV1);
 				}else{
 					ImU32 placeholder = ImGui::GetColorU32(ImGuiCol_WindowBg);
 					drawList->AddRectFilled(imageMin, imageMax, placeholder, 3.0f);
@@ -7717,7 +7717,7 @@ uiPrefabGrid(int *filtered, int numFiltered)
 				ImVec2 imageMax = ImVec2(max.x - 10.0f, min.y + 136.0f);
 				rw::Texture *thumb = GetPrefabThumbnailTexture(gBrowserPrefabPaths[i]);
 				if(thumb && thumb->raster)
-					drawList->AddImage((void*)(intptr_t)thumb, imageMin, imageMax, ImVec2(0, 1), ImVec2(1, 0));
+					drawList->AddImage((void*)(intptr_t)thumb, imageMin, imageMax, CAMTEX_UV0, CAMTEX_UV1);
 				else{
 					drawList->AddRectFilled(imageMin, imageMax, ImGui::GetColorU32(ImGuiCol_WindowBg), 3.0f);
 					drawList->AddText(ImVec2(imageMin.x + 10.0f, imageMin.y + 54.0f),
@@ -7763,7 +7763,7 @@ uiCenteredSquarePreview(rw::Texture *texture, float maxFontHeights)
 	if(availableWidth > previewSize)
 		ImGui::SetCursorPosX(cursorX + (availableWidth - previewSize) * 0.5f);
 	ImGui::Image((void*)(intptr_t)texture, ImVec2(previewSize, previewSize),
-		ImVec2(0, 1), ImVec2(1, 0));
+		CAMTEX_UV0, CAMTEX_UV1);
 }
 
 static void

@@ -46,8 +46,12 @@ static void
 BringPanelHome(ImGuiWindow *window, ImGuiViewportP *viewport, int index)
 {
 	float offset = 20.0f + (index % 6) * 24.0f;
-	ImVec2 size(ImMin(window->SizeFull.x, ImMax(100.0f, viewport->WorkSize.x - offset)),
-	            ImMin(window->SizeFull.y, ImMax(100.0f, viewport->WorkSize.y - offset)));
+	// keep the panel's own size (a sensible default if it has none), only shrinking it to fit the window
+	ImVec2 size = window->SizeFull;
+	if(size.x < 240.0f || size.y < 160.0f)
+		size = ImVec2(ImMax(size.x, 360.0f), ImMax(size.y, 420.0f));
+	size.x = ImMin(size.x, ImMax(240.0f, viewport->WorkSize.x - offset));
+	size.y = ImMin(size.y, ImMax(160.0f, viewport->WorkSize.y - offset));
 	ImGui::SetWindowPos(window, ImVec2(viewport->WorkPos.x + offset, viewport->WorkPos.y + offset), ImGuiCond_Always);
 	ImGui::SetWindowSize(window, size, ImGuiCond_Always);
 	// SetWindowCollapsed only queues a toggle for the next Begin(); set it outright
@@ -62,6 +66,9 @@ static void
 RestorePanelPositions(void)
 {
 	ImGuiViewportP *viewport = (ImGuiViewportP*)ImGui::GetMainViewport();
+	// the main window's size isn't known for the first frames: rescuing then would squash panels
+	if(viewport->WorkSize.x < 320.0f || viewport->WorkSize.y < 240.0f)
+		return;
 	int index = 0;
 	bool all = bringPanelsHome;
 	bringPanelsHome = false;

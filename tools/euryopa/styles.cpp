@@ -835,7 +835,7 @@ uiStyleModels(MappingStyle &s)
 		}
 		ImDrawList *dl = ImGui::GetWindowDrawList();
 		if(tex && tex->raster)
-			dl->AddImage((void*)(intptr_t)tex, pos, ImVec2(pos.x + thumb, pos.y + thumb), ImVec2(0, 1), ImVec2(1, 0));
+			dl->AddImage((void*)(intptr_t)tex, pos, ImVec2(pos.x + thumb, pos.y + thumb), CAMTEX_UV0, CAMTEX_UV1);
 		else
 			dl->AddRectFilled(pos, ImVec2(pos.x + thumb, pos.y + thumb), ImGui::GetColorU32(ImGuiCol_FrameBg), 3.0f);
 		if(browserId == m.id)

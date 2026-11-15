@@ -576,6 +576,19 @@ void SampPopups(void);
 void SampShortcuts(bool allowEditorShortcuts);
 // Model Viewer (modelviewer.cpp)
 void ModelViewerOpen(int modelId, ObjectInst *inst);
+// UVs for drawing an off-screen camera texture (thumbnails, previews, Model Viewer) the right way
+// round. Those cameras look with up = -Z, which turns the image 180 degrees; on Direct3D 9 that
+// leaves it mirrored once the V flip is applied, so U is flipped as well. Other backends keep the
+// original mapping (untested here).
+#ifdef RW_D3D9
+#define CAMTEX_UV0 ImVec2(1, 1)
+#define CAMTEX_UV1 ImVec2(0, 0)
+#define CAMTEX_FLIP_U 1
+#else
+#define CAMTEX_UV0 ImVec2(0, 1)
+#define CAMTEX_UV1 ImVec2(1, 0)
+#define CAMTEX_FLIP_U 0
+#endif
 bool ModelViewerIsOpen(void);
 void ModelViewerRender(void);
 void ModelViewerWindow(void);

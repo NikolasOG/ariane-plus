@@ -820,8 +820,9 @@ ModelViewerWindow(void)
 	ImDrawList *dl = ImGui::GetWindowDrawList();
 	if(V.texture && V.rtW > 0)
 		dl->AddImage((void*)(intptr_t)V.texture, p0, ImVec2(p0.x + vp.x, p0.y + vp.y),
-			// camera textures come out mirrored and upside down: flip both axes
-			ImVec2(vp.x / V.rtW, 1), ImVec2(0, 1.0f - vp.y / V.rtH));
+			// same orientation as CAMTEX_UV0/1, cropped to the viewport (the target is rounded up to 16 px)
+			ImVec2(CAMTEX_FLIP_U ? vp.x / V.rtW : 0.0f, 1.0f),
+			ImVec2(CAMTEX_FLIP_U ? 0.0f : vp.x / V.rtW, 1.0f - vp.y / V.rtH));
 	else
 		dl->AddText(ImVec2(p0.x + 12, p0.y + 12), ImGui::GetColorU32(ImGuiCol_TextDisabled),
 			V.cloneFailed ? "This model can't be loaded" : "Loading...");
