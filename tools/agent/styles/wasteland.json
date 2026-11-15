@@ -1,0 +1,31 @@
+{
+ "format": "ariane-style-1",
+ "name": "wasteland",
+ "description": "Post-apocalyptic wasteland: rusted wrecks, ruined buildings, rubble, makeshift huts and container walls.",
+ "models": [
+  {"id": 12957, "name": "sw_pickupwreck01", "role": "vehicle", "weight": 1.0, "notes": "rusty pickup wreck, 3.8 x 5.9 m"},
+  {"id": 3593, "name": "la_fuckcar2", "role": "vehicle", "weight": 1.0, "notes": "wrecked car shell, 3.0 x 7.0 m"},
+  {"id": 3594, "name": "la_fuckcar1", "role": "vehicle", "weight": 1.0, "notes": "wrecked car shell, 2.9 x 7.2 m"},
+  {"id": 3364, "name": "des_ruin3_", "role": "ruin", "weight": 1.0, "notes": "small desert ruin, 10 x 11 m, walls 4.6 m"},
+  {"id": 3866, "name": "demolish1_SFXRF", "role": "ruin", "weight": 0.6, "notes": "large demolished building shell, 27 x 21 m, 16 m tall"},
+  {"id": 3887, "name": "demolish4_SFXRF", "role": "ruin", "weight": 0.4, "notes": "long demolished block, 17 x 55 m"},
+  {"id": 10984, "name": "rubbled01_SFS", "role": "debris", "weight": 0.5, "notes": "rubble field, 17 x 22 m, 2.5 m high"},
+  {"id": 1358, "name": "CJ_SKIP_Rubbish", "role": "debris", "weight": 1.0, "notes": "rubbish skip, 4.4 x 3.0 m"},
+  {"id": 2937, "name": "kmb_plank", "role": "debris", "weight": 1.0, "notes": "loose plank, 2.5 m"},
+  {"id": 879, "name": "p_rubble04bcol", "role": "debris", "weight": 1.0, "notes": "rubble heap, 10 x 12 m (settle with --edge-stat max)"},
+  {"id": 880, "name": "p_rubble0bcol", "role": "debris", "weight": 1.0, "notes": "rubble heap, 7 x 6.5 m (settle with --edge-stat max)"},
+  {"id": 3414, "name": "CE_oldhut1", "role": "shelter", "weight": 1.0, "notes": "old hut, 15 x 13 m"},
+  {"id": 3418, "name": "CE_oldhut02", "role": "shelter", "weight": 1.0, "notes": "old hut, 14 x 9 m"},
+  {"id": 2932, "name": "kmb_container_blue", "role": "wall", "weight": 1.0, "notes": "shipping container 3.1 x 7.2 x 2.9 m: stack 2 high in wall runs, single as cover"},
+  {"id": 2934, "name": "kmb_container_red", "role": "wall", "weight": 1.0, "notes": "shipping container 3.1 x 7.2 x 2.9 m"},
+  {"id": 2935, "name": "kmb_container_yel", "role": "wall", "weight": 1.0, "notes": "shipping container 3.1 x 7.2 x 2.9 m"},
+  {"id": 19641, "name": "FenceSection1", "role": "wall", "weight": 1.0, "notes": "fence section 8 m long, 5 m high: gap-free runs with wall_run"},
+  {"id": 1426, "name": "DYN_SCAFFOLD", "role": "prop", "weight": 1.0, "notes": "scaffolding 3.5 x 2.2 x 3.4 m: line ruined facades (facade tool)"}
+ ],
+ "textures": ["rusty_metal", "rusty_pole", "corrugated_metal", "corrugated_tile", "corrugated_grey", "old_paint", "sheet_metal", "mesh_fence", "barn_wood", "barn_wood_dark", "demolished_wall", "blistered_paint", "burnt_wall", "rubble", "concrete", "dirt", "cardboard"],
+ "avoid": [
+  {"id": 1225, "name": "barrel4", "reason": "explosive"},
+  {"id": 1370, "name": "CJ_FLAME_Drum_(F)", "reason": "explosive"}
+ ],
+ "notes": "Rust, rubble and makeshift shelters. Nothing on roads or dirt tracks, no explosive props, settle every object into the terrain, prefer dark material colours outdoors."
+}

@@ -3922,6 +3922,7 @@ uiMainmenu(void)
 			if(ImGui::MenuItem(ICON_FA_PEN " Editor", "E", showEditorWindow)) { showEditorWindow ^= 1; }
 			if(ImGui::MenuItem(ICON_FA_MAGNIFYING_GLASS " Object Browser", "B", showBrowserWindow)) { showBrowserWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_CODE_COMPARE " Changes", "F", showDiffWindow)) { showDiffWindow ^= 1; }
+				if(ImGui::MenuItem(ICON_FA_CUBE " Mapping Styles", "Ctrl+Shift+M", gShowStylesWindow)) { gShowStylesWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_LIST " Log ", nil, showLogWindow)) { showLogWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_LIST " Keyboard Shortcuts", nil, showShortcutsWindow)) { showShortcutsWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_CIRCLE_QUESTION " Help", nil, showHelpWindow)) { showHelpWindow ^= 1; }
@@ -4660,6 +4661,7 @@ uiKeyboardShortcutsWindow(void)
 		{ "Windows", "E", "Toggle Editor window", "Global" },
 		{ "Windows", "B", "Toggle Object Browser window", "Global" },
 		{ "Windows", "F", "Toggle Changes window", "Global" },
+		{ "Windows", "Ctrl+Shift+M", "Toggle Mapping Styles window (curated model sets for agents)", "Global" },
 
 		{ "Camera", "LMB drag", "First-person look around", "Viewport" },
 		{ "Camera", "Ctrl+Alt+LMB drag", "Dolly camera along view direction", "Viewport" },
@@ -4702,7 +4704,7 @@ uiKeyboardShortcutsWindow(void)
 		{ "Object Browser", "B", "Open or close Object Browser", "Global" },
 		{ "Object Browser", "Up / Down", "Move selected object through current filtered list", "Object Browser list" },
 		{ "Object Browser", "List / Tiles", "Switch between text rows and thumbnail tiles", "Object Browser" },
-		{ "Object Browser", "Right-click object row", "Add or remove favourite", "Object Browser list" },
+		{ "Object Browser", "Right-click object row", "Add or remove favourite, add to a mapping style", "Object Browser list" },
 		{ "Object Browser", "Prefabs tab", "Browse prefab files and import the selected prefab", "Object Browser" },
 		{ "Object Browser", "Click in 3D view", "Place selected object", "Place mode" },
 		{ "Object Browser", "Shift+click in 3D view", "Place object and stay in place mode", "Place mode" },
@@ -7438,6 +7440,7 @@ uiObjectFavouritePopup(int objectId)
 			if(ImGui::MenuItem("Add to Favourites"))
 				ToggleFavourite(objectId);
 		}
+		StylesObjectMenu(objectId);
 		ImGui::EndPopup();
 	}
 }
@@ -7800,6 +7803,8 @@ uiBrowserSelectedObject(int selId)
 		if(ImGui::Button("Favourite"))
 			ToggleFavourite(selId);
 	}
+	ImGui::SameLine();
+	StylesObjectButton(selId);	// styles.cpp
 	ImGui::SameLine();
 	if(ImGui::Button("Deselect")){
 		if(gPlaceMode) SpawnExitPlaceMode();
@@ -8266,6 +8271,7 @@ gui(void)
 
 	// SA-MP: Ctrl+Shift+S/L/P/C/O (samp.cpp)
 	SampShortcuts(allowEditorShortcuts);
+	StylesShortcuts(allowEditorShortcuts);	// Ctrl+Shift+M (styles.cpp)
 
 	// Gizmo mode shortcuts (not in water edit mode — water gizmo is always translate)
 	if(allowEditorShortcuts && !WaterLevel::gWaterEditMode){
@@ -8395,6 +8401,7 @@ gui(void)
 
 	if(!CPad::IsCtrlDown() && CPad::IsKeyJustDown('F')) showDiffWindow ^= 1;
 	if(showDiffWindow) uiDiffWindow();
+	StylesWindow();
 
 	if(CPad::IsKeyJustDown('B')){
 		showBrowserWindow ^= 1;

@@ -42,6 +42,7 @@ mcp = MCPServer(
 	description="Inspect GTA assets and safely edit an Ariane scratch layer.",
 	instructions=(
 		"SA-MP mapping: call mapping_toolkit_guide first - it lists the map_*, building_*, prefab_*, material_*, "
+		"style_*, "
 		"custom_model* and samp_sync tools (terrain scans, gap-free walls, packing, settling, lint, retexturing). "
 		"Vibe mapping workflow: read project memory; survey the user camera/selected pixel without moving it. "
 		"Translate the user's language into catalogue roles/styles/avoid while preserving their original brief. "
@@ -130,11 +131,14 @@ def ariane_status() -> dict:
 def search_assets(query: str, category: str | None = None,
 	              max_width: float | None = None, max_depth: float | None = None,
 	              has_collision: bool | None = None, defined_only: bool = True,
-	              limit: int = 20) -> list[dict]:
-	"""Find GTA assets by text and physical constraints before visual review."""
+	              limit: int = 20, style: str | None = None, style_role: str | None = None,
+	              style_mode: Literal["prefer", "limit"] = "prefer") -> list[dict]:
+	"""Find GTA assets by text and physical constraints before visual review. style = a mapping style
+	(styles_list): 'prefer' ranks its models (of style_role) first, 'limit' returns only them."""
 	return service.search_assets(query, category=category, max_width=max_width,
 	                             max_depth=max_depth, has_collision=has_collision,
-	                             defined_only=defined_only, limit=limit)
+	                             defined_only=defined_only, limit=limit, style=style,
+	                             style_role=style_role, style_mode=style_mode)
 
 
 @mcp.tool()
@@ -864,14 +868,70 @@ def map_wall_run(points: list[list[float]], closed: bool = True, gates: list[dic
 
 
 @mcp.tool()
-def map_pack(zone: list[list[float]], models: list[int], count: int = 20, weights: list[float] | None = None,
-             gap: float = 1.5, step: float = 2.0, scan_path: str | None = None, align: str = "track", seed: int = 1,
-             dry_run: bool = False) -> dict:
+def map_pack(zone: list[list[float]], models: list[int] | None = None, count: int = 20,
+             weights: list[float] | None = None, gap: float = 1.5, step: float = 2.0, scan_path: str | None = None,
+             align: str = "track", seed: int = 1, dry_run: bool = False, style: str | None = None,
+             style_role: str | None = None, style_mode: Literal["prefer", "limit"] = "prefer") -> dict:
 	"""Fill a polygon zone with up to `count` structures on genuinely free ground: clear of world buildings,
 	trees, placed objects (gap m), dirt tracks and roads (needs scan_path). Sites nearest the tracks first, facing
-	them (align='track'; or 'random' / a heading). Good for shacks, tents, stalls; dense but tidy."""
+	them (align='track'; or 'random' / a heading). Good for shacks, tents, stalls; dense but tidy.
+	style: without models, use that mapping style's models of style_role ('shelter', 'vehicle,debris'...) with
+	their weights; with models, 'prefer' weights the style's up, 'limit' keeps only the style's."""
 	return mapping_tools.pack(_slow_service(), zone, models, count=count, weights=weights, gap=gap, step=step,
-	                          scan=scan_path, align=align, seed=seed, dry_run=dry_run)
+	                          scan=scan_path, align=align, seed=seed, dry_run=dry_run, style=style,
+	                          style_role=style_role, style_mode=style_mode)
+
+
+# ---------------------------------------------------------------- mapping styles
+if __package__:
+	from . import styles as styles_mod
+else:
+	import styles as styles_mod
+
+
+@mcp.tool()
+def styles_list() -> dict:
+	"""Mapping styles the user curated (wasteland, ...): name, description, models per role. When the user asks
+	for a map 'in the X style', call style_show(X) first and choose models from it."""
+	return {"ok": True, "dir": str(styles_mod.styles_dir()), "styles": styles_mod.list_styles(),
+	        "roles": list(styles_mod.ROLES)}
+
+
+@mcp.tool()
+def style_show(style: str) -> dict:
+	"""One style in full: models grouped by role (id, name, weight = how often, notes), preferred texture presets
+	(material_preset names, resolved), the avoid list and the style's rules (notes). Use only these models for
+	that style unless nothing fits a needed role; never use avoid-list models."""
+	return styles_mod.show_style(style)
+
+
+@mcp.tool()
+def style_pick(style: str, role: str | None = None, count: int = 1, seed: int | None = None) -> dict:
+	"""Weighted pick of `count` models from a style (role: 'shelter', 'wall,ruin', or None = any). Distinct
+	models while the pool lasts, then repeats. Avoid-list models are never returned."""
+	return styles_mod.pick(style, role, count, seed)
+
+
+@mcp.tool()
+def style_add_models(style: str, models: list[int], role: str | None = None, weight: float | None = None,
+                     notes: str | None = None, description: str | None = None,
+                     textures: list[str] | None = None, avoid: list[int] | None = None,
+                     allow_hazards: bool = False) -> dict:
+	"""Add (or update role / weight / notes of) models in a style; creates the style if needed. Every id is
+	probed in the running editor (must exist) and explosive props are refused unless allow_hazards. textures
+	adds texture preset names, avoid adds model ids the style must never use. The editor's Mapping Styles
+	window shows the change."""
+	result = styles_mod.add_models(style, models, role=role, weight=weight, notes=notes,
+	                               description=description or "", service=service, allow_hazards=allow_hazards)
+	if description is not None or textures or avoid:
+		styles_mod.update_style(style, description=description, add_textures=textures or [], add_avoid=avoid or [])
+	return result
+
+
+@mcp.tool()
+def style_remove_models(style: str, models: list[int]) -> dict:
+	"""Remove models from a style (the style itself stays)."""
+	return styles_mod.remove_models(style, models)
 
 
 @mcp.tool()

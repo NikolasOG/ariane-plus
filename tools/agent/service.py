@@ -253,7 +253,20 @@ class ArianeService:
 	def search_assets(self, query: str, *, category: str | None = None,
 	                  max_width: float | None = None, max_depth: float | None = None,
 	                  has_collision: bool | None = None, defined_only: bool = False,
-	                  limit: int = 30) -> list[dict]:
+	                  limit: int = 30, style: str | None = None, style_role=None,
+	                  style_mode: str = "prefer") -> list[dict]:
+		"""style: a mapping style (styles.py) - 'prefer' ranks its models (of style_role) first,
+		'limit' returns only them (query matched against name / notes / role)."""
+		if style:
+			try:
+				from . import styles as styles_mod
+			except ImportError:
+				import styles as styles_mod
+			base = self.search_assets(query, category=category, max_width=max_width, max_depth=max_depth,
+			                          has_collision=has_collision, defined_only=defined_only,
+			                          limit=max(limit * 4, 100))
+			return styles_mod.filter_assets(base, style, style_role, style_mode, query=query,
+			                                inspect=self.assets.inspect, limit=limit)
 		candidate_limit = min(3000, max(limit, limit * 8 if defined_only else limit))
 		candidates = self.assets.search(query, category=category, max_width=max_width,
 		                                max_depth=max_depth, has_collision=has_collision,

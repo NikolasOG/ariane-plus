@@ -26,6 +26,9 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 
 ## 1. Workflow that produces clean maps
 
+0. **Style**: when the user asks for a style ("wasteland", "make it look like
+   the farm"), call `style_show` (`styles show NAME`) first and choose models
+   from it - see section 9. `styles_list` shows what exists.
 1. **Survey** the site: `ground-scan --bbox=x0,y0,x1,y1 --out scan.json --png scan.png`
    (`map_ground_scan`). The scan holds ground height + surface per metre: dirt
    tracks (`DIRTTRACK`), roads (tarmac), pavements, sand, grass. `plan-map`
@@ -83,7 +86,8 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 | `settle` | `map_settle` | ground placed objects (stack aware) |
 | `delete` (many ids), `transform-batch` | `map_delete_many`, `map_transform_many` | bulk edits |
 | `wall-run` | `map_wall_run` | gap-free perimeter wall with gates |
-| `pack` | `map_pack` | fill a zone on free ground, facing tracks |
+| `pack` | `map_pack` | fill a zone on free ground, facing tracks (`--style`) |
+| `styles list/show/add/remove/pick` | `styles_list`, `style_show`, `style_pick`, `style_add_models`, `style_remove_models` | curated model sets (section 9) |
 | `lint` | `map_lint` | rule checks for a site |
 | `prefab list/save/place` | `prefab_list/save/place` | multi-part structures (bundled: `gatehouse_main`, `ruin_lot`) |
 | `replace-building` | `building_replace` | swap a world building (and LOD), fill the hole |
@@ -99,7 +103,7 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 | `checkpoint save/restore/list` | (service calls) | full snapshots incl. removals + materials |
 
 Python: the same functions live in `mapping_tools`, `ground`, `lint`,
-`prefabs`, `building_tools`, `materials`, `custom_models` (import them with an
+`prefabs`, `building_tools`, `materials`, `custom_models`, `styles` (import them with an
 `ArianeService`).
 
 ## Building blocks (custom objects)
@@ -239,3 +243,42 @@ include on every sync (SA-MP > Server folder...).
 | object floats although settled | mesh drawn above its collision - `settle --visual` |
 | "refusing to sync an empty layer" | the layer was not reloaded after a restart - SA-MP > Load from server, or pass force only if you mean it |
 | custom model not listed | server folder not set, artconfig syntax, missing file - `custom-models list` shows the error |
+
+## 9. Mapping styles
+
+A style is a user-curated set of models ("wasteland": wrecks, ruins, rubble,
+huts, container walls) with a role per model, a weight, notes, preferred
+texture presets and an avoid list. **When asked to map in a style, call
+`style_show` first and choose models from it**; go outside it only for a role
+the style has no model for (say so). Never use its avoid list.
+
+* Files: one JSON per style in Ariane's data folder,
+  `<ariane.exe dir>/ariane/styles/<name>.json` (next to `samp_settings.ini`).
+  The editor (Window > Mapping Styles, Ctrl+Shift+M) and the tools share them;
+  each picks up the other's changes. Override the folder with
+  `ARIANE_STYLES_DIR` (or `ARIANE_DATA_DIR`). Styles shipped in
+  `tools/agent/styles/` (`wasteland`) are copied there once.
+* Roles: `wall`, `shelter`, `ruin`, `prop`, `debris`, `vehicle`, `vegetation`,
+  `ground`, `light`, `sign`, `other` (free text is allowed). `weight` = how often
+  a model is picked (1 normal, 0 never).
+* Editor: Object Browser > "Add to style" button or right-click a row/tile >
+  Add to style > STYLE > role; SA-MP > Add selection to style (models of the
+  selected world objects). The window edits roles, weights, notes, textures
+  and the avoid list, and places a model with one click.
+
+| CLI | MCP | What |
+| --- | --- | --- |
+| `styles list` | `styles_list` | styles, model counts per role |
+| `styles show NAME` | `style_show` | models by role, texture presets (resolved), avoid list, rules |
+| `styles pick NAME --role shelter,ruin --count 4` | `style_pick` | weighted pick (distinct while the pool lasts) |
+| `styles add NAME IDS --role wall --weight 1 --notes ..` | `style_add_models` | add / update models (creates the style); ids are probed, explosive props refused |
+| `styles remove NAME IDS` / `--delete` | `style_remove_models` | remove models / the style |
+| `pack --style NAME --style-role shelter` | `map_pack(style=, style_role=)` | no models: the style's models by role, with their weights; with models: `--style-mode prefer` (weights style models up) or `limit` (only style models) |
+| `assets search Q --style NAME` | `search_assets(style=, style_role=, style_mode=)` | style models first (tagged `style_role`), `limit` = only them |
+
+```
+style_show("wasteland")
+map_pack(zone, style="wasteland", style_role="shelter", count=12, scan_path=...)
+map_pack(zone, style="wasteland", style_role="vehicle,debris", count=20, gap=2.5, scan_path=...)
+material_preset(instance_id, 0, "rusty_metal")       # from the style's textures
+```

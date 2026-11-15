@@ -27,6 +27,17 @@ before `--` and coordinates after it: `arianectl place 1345 -- -420 1320 0 90`.
 Edits need a session: `arianectl session begin` / `begin_edit_session`, and
 `session commit` / `finish_edit_session(commit=True)` when done.
 
+### Mapping styles
+
+When the user asks for a style ("wasteland", "in the farm style"), call
+`style_show` (`arianectl styles show NAME`) first and choose models from it:
+its models by role (weight = how often), its texture presets and its rules.
+Never use its avoid list. `map_pack(..., style=NAME, style_role="shelter")`
+packs straight from the style; `style_pick(NAME, role, count)` picks models for
+hand placement. No style named yet? `styles_list`. The user curates styles in
+the editor (Window > Mapping Styles); add models with `style_add_models` only
+when asked.
+
 ## 2. The build loop
 
 ```

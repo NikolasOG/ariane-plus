@@ -11,7 +11,8 @@ the scene patch API:
                     container posts, stacked levels
   pack              fill a zone with structures on free ground: avoids world
                     buildings, placed objects, dirt tracks and roads, aligns to
-                    the nearest track (street frontage)
+                    the nearest track (street frontage); style= picks the models
+                    from a mapping style (styles.py)
   plan_map          top-down plan PNG: world footprints, placed objects, tracks,
                     roads, optional lint issues
 
@@ -468,15 +469,24 @@ def wall_run(service, points: list, *, closed: bool = True, gates: list | None =
 
 
 # ------------------------------------------------------------------ pack
-def pack(service, zone: list, models: list, *, count: int = 20, weights: list | None = None, gap: float = 1.5,
+def pack(service, zone: list, models: list | None = None, *, count: int = 20, weights: list | None = None, gap: float = 1.5,
          step: float = 2.0, scan: str | None = None, align: str = "track", seed: int = 1,
          keep_off_tracks: float = 0.5, keep_off_roads: float = 1.0, avoid_world: bool = True,
-         dry_run: bool = False) -> dict:
+         dry_run: bool = False, style: str | None = None, style_role=None, style_mode: str = "prefer") -> dict:
 	"""Place up to `count` structures from `models` on free ground inside a
 	polygon zone. Candidates nearest the dirt tracks come first (street
 	frontage) and face them (align='track'); align may also be a heading in
 	degrees or 'random'. Free = inside the zone, clear of world buildings and
-	tree trunks, placed objects (gap m), dirt tracks and roads (ground scan)."""
+	tree trunks, placed objects (gap m), dirt tracks and roads (ground scan).
+	style: a mapping style (styles.py). Without models, its models of style_role (str / 'a,b' / list, default
+	all) are used with their weights; with models, style_mode 'prefer' weights the style's models up and
+	'limit' keeps only them. The style's avoid list is always dropped."""
+	if style or not models:
+		try:
+			from . import styles as styles_mod
+		except ImportError:
+			import styles as styles_mod
+		models, weights = styles_mod.apply_to_models(models, weights, style, style_role, style_mode)
 	rng = random.Random(seed)
 	B = Bounds(service)
 	zone = [tuple(p[:2]) for p in zone]

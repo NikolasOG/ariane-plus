@@ -594,6 +594,13 @@ std::string SampCustomModelsJson(void);
 int SampResolveModel(int model);
 int SampExportModel(int model);
 const char *SampCustomModelDff(int internalId);
+// Mapping styles (styles.cpp): curated model sets in <data dir>/styles/*.json, shared with the agent tools
+extern bool gShowStylesWindow;
+void StylesWindow(void);	// call every frame (draws the window when open, and its popups)
+void StylesShortcuts(bool allowEditorShortcuts);	// Ctrl+Shift+M
+void StylesObjectMenu(int objectId);	// "Add to style" submenu (context menus)
+void StylesObjectButton(int objectId);	// "Add to style" button
+void StylesSelectionMenu(void);	// "Add selection to style" submenu (selected instances' models)
 
 // Game Data structures
 

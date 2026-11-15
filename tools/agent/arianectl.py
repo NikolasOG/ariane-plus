@@ -26,6 +26,10 @@ if __package__:
 else:
 	from service import ArianeService, ScenePatchError, DEFAULT_STATE_DIR
 if __package__:
+	from . import styles
+else:
+	import styles
+if __package__:
 	from . import mapping_tools, materials, custom_models, blocks
 else:
 	import mapping_tools, materials, custom_models, blocks
@@ -160,6 +164,25 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	bco = blk_sub.add_parser("column", help="n-sided round column standing on z")
 	[bco.add_argument(n, type=float) for n in ("x", "y", "z", "radius", "height")]
 	bco.add_argument("--sides", type=int, default=8); bco.add_argument("--thickness", type=float, default=0.18); tex_args(bco)
+	sty = sub.add_parser("styles", help="Mapping styles: curated model sets (wasteland...) shared with the editor's "
+	                                     "Mapping Styles window")
+	sty_sub = sty.add_subparsers(dest="styles_command", required=True)
+	sty_sub.add_parser("list")
+	sshow = sty_sub.add_parser("show", help="models by role, texture presets, avoid list"); sshow.add_argument("style")
+	sadd = sty_sub.add_parser("add", help="add / update models (creates the style if needed); ids are probed")
+	sadd.add_argument("style"); sadd.add_argument("models", type=int, nargs="*")
+	sadd.add_argument("--role"); sadd.add_argument("--weight", type=float); sadd.add_argument("--notes")
+	sadd.add_argument("--description", help="set the style description")
+	sadd.add_argument("--textures", nargs="*", default=[], help="add texture presets (material presets)")
+	sadd.add_argument("--avoid", type=int, nargs="*", default=[], help="add model ids to the avoid list")
+	sadd.add_argument("--allow-hazards", action="store_true", help="accept explosive props")
+	sadd.add_argument("--no-probe", action="store_true", help="don't check the ids against the running editor")
+	srem = sty_sub.add_parser("remove", help="remove models, or the whole style with --delete")
+	srem.add_argument("style"); srem.add_argument("models", type=int, nargs="*")
+	srem.add_argument("--delete", action="store_true")
+	spick = sty_sub.add_parser("pick", help="weighted pick of models (distinct while the pool lasts)")
+	spick.add_argument("style"); spick.add_argument("--role"); spick.add_argument("--count", type=int, default=1)
+	spick.add_argument("--seed", type=int)
 	witems = sub.add_parser("world-items", help="World (native) objects whose origin is inside a rectangle")
 	witems.add_argument("--bbox", required=True, help="x0,y0,x1,y1"); witems.add_argument("--out", type=Path, help="JSONL")
 	wrun = sub.add_parser("wall-run", help="Lay a gap-free wall (stacked containers + fence sections) along a polyline")
@@ -174,7 +197,11 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	wrun.add_argument("--dry-run", action="store_true")
 	packp = sub.add_parser("pack", help="Fill a zone with structures on free ground, facing the nearest dirt track")
 	packp.add_argument("--zone", required=True, help="JSON polygon [[x,y],...] or a .json file")
-	packp.add_argument("--models", type=int, nargs="+", required=True)
+	packp.add_argument("--models", type=int, nargs="+", help="model ids (or --style)")
+	packp.add_argument("--style", help="mapping style: without --models use its models (see 'styles show')")
+	packp.add_argument("--style-role", help="only the style's models with this role (a,b for several)")
+	packp.add_argument("--style-mode", choices=("prefer", "limit"), default="prefer",
+	                   help="with --models: prefer = weight style models up, limit = only style models")
 	packp.add_argument("--weights", type=float, nargs="*")
 	packp.add_argument("--count", type=int, default=20); packp.add_argument("--gap", type=float, default=1.5)
 	packp.add_argument("--step", type=float, default=2.0); packp.add_argument("--scan", type=Path)
@@ -408,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
 	search.add_argument("--max-depth", type=float); search.add_argument("--has-collision", action="store_true")
 	search.add_argument("--include-lod", action="store_true"); search.add_argument("--limit", type=int, default=30)
 	search.add_argument("--include-hazards", action="store_true", help="also return explosive props (hidden by default)")
+	search.add_argument("--style", help="mapping style: rank its models first (--style-mode limit: only them)")
+	search.add_argument("--style-role"); search.add_argument("--style-mode", choices=("prefer", "limit"), default="prefer")
 	asides = asset_sub.add_parser("sides", help="Which sides of a model are actually drawn (open-backed models)")
 	asides.add_argument("asset_id", type=int)
 	smatch = asset_sub.add_parser("size-match", help="Models with a similar footprint (e.g. a ruin to replace a building)")
@@ -522,11 +551,12 @@ def main(argv: list[str] | None = None) -> int:
 			elif args.asset_command == "search":
 				service = ArianeService(args.socket, args.db, args.timeout,
 				                        args.discovery_dir, args.state_dir)
-				if args.defined_only:
+				if args.defined_only or args.style:
 					payload = {"assets": service.search_assets(
 						args.query, category=args.category, max_width=args.max_width,
 						max_depth=args.max_depth, has_collision=True if args.has_collision else None,
-						defined_only=True, limit=args.limit)}
+						defined_only=bool(args.defined_only), limit=args.limit, style=args.style,
+						style_role=args.style_role, style_mode=args.style_mode)}
 				else:
 					payload = {"assets": AssetIndex(args.db).search(
 						args.query, category=args.category, max_width=args.max_width,
@@ -823,6 +853,25 @@ def main(argv: list[str] | None = None) -> int:
 				payload = materials.txd_textures(service, args.txd)
 			else:
 				payload = {"ok": True, "presets": materials.TEXTURE_PRESETS, "resolves": materials.check_presets(service)}
+		elif args.command == "styles":
+			c = args.styles_command
+			if c == "list":
+				payload = {"ok": True, "dir": str(styles.styles_dir()), "styles": styles.list_styles()}
+			elif c == "show":
+				payload = {"ok": True, **styles.show_style(args.style)}
+			elif c == "add":
+				service = None if args.no_probe else ArianeService(args.socket, args.db, args.timeout,
+				                                                   args.discovery_dir, args.state_dir)
+				payload = styles.add_models(args.style, args.models, role=args.role, weight=args.weight,
+				                            notes=args.notes, description=args.description or "", service=service,
+				                            allow_hazards=args.allow_hazards)
+				if args.description is not None or args.textures or args.avoid:
+					styles.update_style(args.style, description=args.description, add_textures=args.textures,
+					                    add_avoid=args.avoid)
+			elif c == "remove":
+				payload = styles.delete_style(args.style) if args.delete else styles.remove_models(args.style, args.models)
+			else:
+				payload = styles.pick(args.style, args.role, args.count, args.seed)
 		elif args.command in {"world-items", "wall-run", "pack", "plan-map"}:
 			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
 			def js(v):
@@ -842,7 +891,8 @@ def main(argv: list[str] | None = None) -> int:
 			elif args.command == "pack":
 				payload = mapping_tools.pack(service, js(args.zone), args.models, count=args.count, weights=args.weights,
 				                             gap=args.gap, step=args.step, scan=str(args.scan) if args.scan else None,
-				                             align=args.align, seed=args.seed, dry_run=args.dry_run)
+				                             align=args.align, seed=args.seed, dry_run=args.dry_run, style=args.style,
+				                             style_role=args.style_role, style_mode=args.style_mode)
 			else:
 				box = tuple(float(v) for v in args.bbox.split(","))
 				payload = mapping_tools.plan_map(service, box, args.out, scan=str(args.scan) if args.scan else None,
@@ -884,7 +934,7 @@ def main(argv: list[str] | None = None) -> int:
 			payload = engine_command(ArianeClient(args.socket, args.timeout), args)
 		emit(payload)
 		return 0
-	except (ArianeError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+	except (ArianeError, FileNotFoundError, OSError, RuntimeError, ValueError, KeyError) as error:
 		if isinstance(error, ScenePatchError): emit(error.payload)
 		elif isinstance(error, ArianeError) and error.response:
 			emit({"ok": False, "error": str(error), **{

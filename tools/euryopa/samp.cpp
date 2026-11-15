@@ -1748,6 +1748,7 @@ SampMenu(void)
 	if(ImGui::IsItemHovered())
 		ImGui::SetTooltip("Copies the selected objects as Pawn code in the export format (%s).",
 		                  gSampExportFormat == SAMP_FORMAT_WRAPPER ? "wrapper" : gSampExportFormat == SAMP_FORMAT_STREAMER ? "streamer" : "native");
+	StylesSelectionMenu();
 	ImGui::Separator();
 	if(ImGui::MenuItem("Sync to server", "Ctrl+Shift+S")) SampSyncToServer();
 	if(ImGui::MenuItem("Reload from server", "Ctrl+Shift+L")) SampRequestReload();
