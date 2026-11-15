@@ -20,6 +20,15 @@ def _bounds(service, model):
 	return service.probe_asset(model, ensure_renderable=True).get("collision_bounds")
 
 
+def _visual_bottom(service, model):
+	"""Lowest point that is actually drawn: the higher of the collision and mesh
+	bottoms (some models' walls start well above their collision box)."""
+	a = service.probe_asset(model, ensure_renderable=True)
+	cb, rb = a.get("collision_bounds"), a.get("render_bounds")
+	vals = [v for v in ((cb[0][2] if cb else None), (rb[0][2] if rb else None)) if v is not None]
+	return max(vals) if vals else 0.0
+
+
 def find_world_building(service, x, y, radius=30.0, model=None):
 	"""Nearest non-agent, non-LOD instance whose footprint contains / is closest to (x, y)."""
 	best = None
@@ -107,8 +116,7 @@ def replace_building(service, x, y, new_model, *, old_model=None, heading_offset
 		if misses >= 3:
 			ground = pz + az
 			slabs = fill_ground(service, px, py, h, ob, ground)
-			nb_ = nb or ((0, 0, 0), (0, 0, 0))
-			z_fixed = ground - nb_[0][2] + 0.02 if dz is None else pz + dz
+			z_fixed = ground - _visual_bottom(service, new_model) + 0.02 if dz is None else pz + dz
 	op = {"action": "place", "key": f"replace:{uuid.uuid4().hex[:10]}", "model": new_model, "x": wx, "y": wy,
 	      "z": z_fixed if z_fixed is not None else pz, "heading": (h + heading_offset) % 360,
 	      "snap": snap and z_fixed is None}
@@ -202,13 +210,25 @@ def _sides(quad):
 COMPASS = {"N": (0, 1), "S": (0, -1), "E": (1, 0), "W": (-1, 0)}
 
 
-def facade(service, x, y, model, *, side="auto", spacing=None, offset=0.8, levels="auto", level_height=None,
-           heading_offset=0.0, margin=1.0, max_levels=6, road_mask=None, building_model=None) -> dict:
-	"""Line one side of the building at (x, y) with `model`.
+def _ray(service, start, end):
+	return service.client.raycast_segment(list(start), list(end), target_tolerance=0.0).get("hit")
 
-	side: auto (the side facing the nearest road / open space), N/S/E/W, or 0-3.
-	levels: 'auto' stacks up to the building's collision height, or an int.
-	The first level is snapped to the ground; upper levels sit exactly on top.
+
+def facade(service, x, y, model, *, side="auto", spacing=None, offset=0.3, levels="auto", level_height=None,
+           heading_offset=0.0, margin=1.0, max_levels=6, road_mask=None, building_model=None,
+           min_run=3, min_levels=2) -> dict:
+	"""Dress a real wall of the building at (x, y) with `model` (scaffolding, rubble...).
+
+	The building's collision box only tells which side to work on; the actual
+	wall is probed per column with raycasts:
+	  * a horizontal ray at chest height from outside must hit *this* building
+	    (not a tree / fence / pole / nothing) - that gives the wall face here;
+	  * a vertical ray just inside the face gives the roof height there.
+	Columns are grouped into runs where the wall face is continuous; runs
+	shorter than `min_run` bays are dropped. Each column is stacked up to the
+	roof height at that spot (levels='auto'), so lower wings get shorter stacks
+	and nothing towers above the roofline; walls lower than `min_levels` levels
+	are skipped. levels=1 puts one row at the foot of the wall (rubble...).
 	"""
 	it = find_world_building(service, x, y, model=building_model)
 	if not it:
@@ -233,42 +253,94 @@ def facade(service, x, y, model, *, side="auto", spacing=None, offset=0.8, level
 	else:
 		chosen = sides[int(side)]
 	(x1, y1), (x2, y2), (nx, ny), L = chosen
+	depth_box = max(bx - ax, by - ay)
 	mb = _bounds(service, model)
 	(max_, may_, maz), (mbx, mby, mbz) = mb if mb else ((-1, -1, 0), (1, 1, 2))
-	width = mbx - max_
-	depth = mby - may_
+	width, depth = mbx - max_, mby - may_
 	module_h = level_height or (mbz - maz)
 	spacing = spacing or width
 	ux, uy = (x2 - x1) / L, (y2 - y1) / L
 	count = max(1, int((L - 2 * margin) // spacing))
 	start = (L - count * spacing) / 2 + spacing / 2
-	building_h = (bz - az)
-	n_levels = levels if isinstance(levels, int) else max(1, min(max_levels, int((building_h - 0.5) // module_h)))
-	heading = math.degrees(math.atan2(uy, ux)) + heading_offset
-	tag = uuid.uuid4().hex[:8]
-	ground_ops, keys = [], []
+	ground_z = pz + az
+	probe_z = ground_z + 1.6
+	columns = []                  # (t, face_distance_inward, ground_z_here, roof_z)
 	for k in range(count):
 		t = start + k * spacing
-		wx = x1 + ux * t + nx * (offset + depth / 2)
-		wy = y1 + uy * t + ny * (offset + depth / 2)
-		key = f"facade:{tag}:{k:03d}:0"
-		keys.append((key, wx, wy))
-		ground_ops.append({"action": "place", "key": key, "model": model, "x": wx, "y": wy, "z": pz, "heading": heading % 360, "snap": True})
-	service.apply_scene_patch(ground_ops)
-	scene = {i.get("object_key"): i for i in service.enumerate_scene()}
+		ox, oy = x1 + ux * t + nx * 10.0, y1 + uy * t + ny * 10.0          # 10 m outside the box side
+		far = 10.0 + depth_box
+		hit = _ray(service, (ox, oy, probe_z), (ox - nx * far, oy - ny * far, probe_z))
+		if not hit or hit.get("agent_scene") or hit.get("instance_id") != it["instance_id"]:
+			columns.append(None); continue
+		hx, hy, _ = hit["point"]
+		d_in = (ox - hx) * nx + (oy - hy) * ny - 10.0                     # wall face, metres inside the box side
+		if levels == "auto" or (isinstance(levels, int) and levels > 1):
+			# the face must be at the same place one level up too: galleries,
+			# porches and overhangs (open fronts) are not walls to scaffold
+			up_z = probe_z + module_h
+			hit2 = _ray(service, (ox, oy, up_z), (ox - nx * far, oy - ny * far, up_z))
+			if not hit2 or hit2.get("instance_id") != it["instance_id"]:
+				columns.append(None); continue
+			d2 = (ox - hit2["point"][0]) * nx + (oy - hit2["point"][1]) * ny - 10.0
+			if abs(d2 - d_in) > 0.5:
+				columns.append(None); continue
+		# roof height just inside the face
+		rx, ry = hx - nx * 0.4, hy - ny * 0.4
+		roof = _ray(service, (rx, ry, ground_z + 80.0), (rx, ry, ground_z - 5.0))
+		roof_z = roof["point"][2] if roof and roof.get("instance_id") == it["instance_id"] else None
+		# the scaffold's own spot must be open sky: no walkway, balcony or roof
+		# overhang of this building above it (open galleries are not walls)
+		fx, fy = hx + nx * (offset + depth / 2), hy + ny * (offset + depth / 2)
+		over = _ray(service, (fx, fy, ground_z + 60.0), (fx, fy, ground_z + 0.3))
+		if over and over.get("instance_id") == it["instance_id"]:
+			columns.append(None); continue
+		# ground in front of the face (world only)
+		g = _ray(service, (fx, fy, probe_z + 1.0), (fx, fy, ground_z - 10.0))
+		gz = g["point"][2] if g and not g.get("agent_scene") else ground_z
+		columns.append((t, d_in, gz, roof_z))
+	# continuous runs of wall
+	runs, cur = [], []
+	for col in columns:
+		if col and cur and abs(col[1] - cur[-1][1]) <= 0.6:
+			cur.append(col)
+		else:
+			if len(cur) >= min_run: runs.append(cur)
+			cur = [col] if col else []
+	if len(cur) >= min_run: runs.append(cur)
+	heading = math.degrees(math.atan2(uy, ux)) + heading_offset
+	tag = uuid.uuid4().hex[:8]
+	ops, stacks = [], []
+	for r_i, run in enumerate(runs):
+		face = sorted(col[1] for col in run)[len(run) // 2]                 # one straight line per run
+		for k, (t, d_in, gz, roof_z) in enumerate(run):
+			if levels == "auto":
+				if roof_z is None:
+					continue
+				n = int((roof_z - gz + 0.6) // module_h)                      # top may reach ~0.6 m above the roof edge
+				n = min(max_levels, n)
+				if n < min_levels:
+					continue
+			else:
+				n = int(levels)
+			wx = x1 + ux * t + nx * (offset + depth / 2 - face)
+			wy = y1 + uy * t + ny * (offset + depth / 2 - face)
+			key = f"facade:{tag}:{r_i:02d}:{k:03d}"
+			ops.append({"action": "place", "key": key, "model": model, "x": wx, "y": wy,
+			            "z": gz - maz + 0.02, "heading": heading % 360, "snap": False})
+			stacks.append((key, wx, wy, gz - maz + 0.02, n))
+	if ops:
+		service.apply_scene_patch(ops)
 	upper = []
-	for key, wx, wy in keys:
-		base = scene.get(key)
-		if not base:
-			continue
-		for lvl in range(1, n_levels):
-			upper.append({"action": "place", "key": key[:-1] + str(lvl), "model": model, "x": wx, "y": wy,
-			              "z": base["position"][2] + lvl * module_h, "heading": heading % 360, "snap": False})
+	for key, wx, wy, z0, n in stacks:
+		for lvl in range(1, n):
+			upper.append({"action": "place", "key": f"{key}:{lvl}", "model": model, "x": wx, "y": wy,
+			              "z": z0 + lvl * module_h, "heading": heading % 360, "snap": False})
 	if upper:
 		service.apply_scene_patch(upper)
-	return {"ok": True, "building": {"name": it.get("name"), "model_id": it["model_id"], "height": round(building_h, 1)},
-	        "side_normal": [round(nx, 2), round(ny, 2)], "side_length": round(L, 1), "columns": count, "levels": n_levels,
-	        "placed": len(ground_ops) + len(upper)}
+	return {"ok": True, "building": {"name": it.get("name"), "model_id": it["model_id"]},
+	        "side_normal": [round(nx, 2), round(ny, 2)], "side_length": round(L, 1),
+	        "probed": count, "wall_columns": sum(1 for c_ in columns if c_), "runs": [len(r) for r in runs],
+	        "stacks": len(stacks), "placed": len(ops) + len(upper)}
 
 
 def size_match(index, width, depth, *, query="", tolerance=0.25, limit=20, include_hazards=False) -> list[dict]:

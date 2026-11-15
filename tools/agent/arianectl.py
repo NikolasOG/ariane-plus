@@ -47,11 +47,46 @@ def settle_objects(service, client, args) -> dict:
 	items = [i for i in items if not str(i.get("name", "")).lower().startswith("lod")]
 	box = [float(v) for v in args.bbox.split(",")] if args.bbox else None
 	want_models = set(args.models or []); want_ids = set(args.ids or [])
+	floor_models = set(getattr(args, "floor_models", []) or [])
 	bounds_cache: dict = {}
 	def bounds(model):
 		if model not in bounds_cache:
 			bounds_cache[model] = service.probe_asset(model, ensure_renderable=True).get("collision_bounds")
 		return bounds_cache[model]
+	render_cache: dict = {}
+	def render_bottom(model):
+		if model not in render_cache:
+			rb = service.probe_asset(model, ensure_renderable=True).get("render_bounds")
+			render_cache[model] = rb[0][2] if rb else None
+		return render_cache[model]
+	profile_cache: dict = {}
+	def visual_gap(base, x, y, z):
+		"""Sink needed so every side's drawn wall bottom meets the terrain (median per side)."""
+		m = base["model_id"]
+		if m not in profile_cache:
+			try:
+				profile_cache[m] = client.command("mesh_profile", m, 16)
+			except Exception:
+				profile_cache[m] = None
+		prof = profile_cache[m]
+		if not prof: return None
+		n = prof["n"]; (mnx, mny, _), (mxx, mxy, _) = prof["bounds"]
+		sx, sy = (mxx - mnx) / n, (mxy - mny) / n
+		h = math.radians(base["rotation"][2]); c, s = math.cos(h), math.sin(h)
+		sides = {"s": [], "n": [], "w": [], "e": []}
+		for r in range(n):
+			for col in range(n):
+				bz = prof["bottom"][r * n + col]
+				if bz is None: continue
+				edge = [k for k, on in (("s", r == 0), ("n", r == n - 1), ("w", col == 0), ("e", col == n - 1)) if on]
+				if not edge: continue
+				lx, ly = mnx + (col + 0.5) * sx, mny + (r + 0.5) * sy
+				wx, wy = x + lx * c - ly * s, y + lx * s + ly * c
+				g = ground(wx, wy, z + bz + 1.0)
+				if g is None: continue
+				for k in edge: sides[k].append(z + bz - g)
+		meds = [sorted(v)[len(v) // 4] for v in sides.values() if v]   # 25th percentile: wall bottoms, not window gaps / corner footings
+		return max(meds) if meds else None
 	def footprint(it, grow=0.0):
 		b = bounds(it["model_id"])
 		if not b: return None
@@ -60,6 +95,8 @@ def settle_objects(service, client, args) -> dict:
 		x, y = it["position"][:2]
 		return [(x + lx * c - ly * s, y + lx * s + ly * c)
 		        for lx, ly in ((ax - grow, ay - grow), (bx + grow, ay - grow), (bx + grow, by + grow), (ax - grow, by + grow))]
+	def quad_area(q):
+		return abs(sum(q[i][0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * q[i][1] for i in range(4))) / 2
 	def inside(px, py, quad):
 		sign = None
 		for i in range(4):
@@ -82,6 +119,9 @@ def settle_objects(service, client, args) -> dict:
 			bz = it["position"][2]
 			for other in items:
 				if other is it or other["instance_id"] in rider_of: continue
+				oq = footprint(other)
+				if oq and quad_area(oq) > quad_area(quad) * 1.5:
+					continue                         # something bigger can't rest on this (a smoke emitter under a ruin...)
 				if other["position"][2] > bz + 0.5 and inside(other["position"][0], other["position"][1], quad):
 					rider_of[other["instance_id"]] = it["instance_id"]; group.append(other)
 		stacks[it["instance_id"]] = group
@@ -89,7 +129,7 @@ def settle_objects(service, client, args) -> dict:
 		for _ in range(10):
 			hit = client.raycast_segment([x, y, z], [x, y, z - 60.0]).get("hit")
 			if not hit: return None
-			if not hit.get("agent_scene"): return hit["point"][2]
+			if not hit.get("agent_scene") or hit.get("model_id") in floor_models: return hit["point"][2]
 			z = hit["point"][2] - 0.02
 		return None
 	ops, report = [], []
@@ -103,6 +143,9 @@ def settle_objects(service, client, args) -> dict:
 		b = bounds(base["model_id"])
 		if not b: continue
 		(ax, ay, az), (bx, by, _) = b
+		rb = render_bottom(base["model_id"])
+		if rb is not None and rb > az:
+			az = rb                                  # mesh starts above its collision box: settle the visible bottom
 		ax += 0.3; ay += 0.3; bx -= 0.3; by -= 0.3
 		h = math.radians(base["rotation"][2]); c, s = math.cos(h), math.sin(h)
 		pts = [(x + lx * c - ly * s, y + lx * s + ly * c) for lx, ly in ((ax, ay), (bx, ay), (bx, by), (ax, by), (0, 0))]
@@ -112,6 +155,10 @@ def settle_objects(service, client, args) -> dict:
 			report.append({"instance_id": base["instance_id"], "skipped": "no ground under footprint"}); continue
 		gap = bottom - min(gs)
 		relief = max(gs) - min(gs)
+		if getattr(args, "visual", False):
+			vg = visual_gap(base, x, y, z)
+			if vg is not None:
+				gap = min(vg, args.max_sink)
 		if gap <= args.min_gap: continue
 		for it in stack:
 			ix, iy, iz = it["position"]
@@ -170,6 +217,12 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	settle.add_argument("--ids", type=int, nargs="*", help="only these instance ids")
 	settle.add_argument("--min-gap", type=float, default=0.05)
 	settle.add_argument("--dry-run", action="store_true")
+	settle.add_argument("--visual", action="store_true",
+	                    help="ground the drawn walls of buildings (not vehicles / open structures): per side, compare the mesh bottom with the "
+	                         "terrain (25th percentile per side) and sink by the worst side - for models built for sloped sites")
+	settle.add_argument("--max-sink", type=float, default=3.0)
+	settle.add_argument("--floor-models", type=int, nargs="*", default=[18981, 19543, 19544, 19545],
+	                    help="placed models that count as ground (slabs, ground planes)")
 	gscan = sub.add_parser("ground-scan",
 		help="Map ground height + collision surface (DIRTTRACK, SAND, TARMAC...) over a rectangle")
 	gscan.add_argument("--bbox", required=True, help="x0,y0,x1,y1 (use --bbox=... for negative values)")
@@ -216,12 +269,14 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	fac = sub.add_parser("facade", help="Line one side of the world building at x,y with a model (scaffolding, rubble...)")
 	fac.add_argument("x", type=float); fac.add_argument("y", type=float); fac.add_argument("model", type=int)
 	fac.add_argument("--side", default="auto", help="auto (faces the road / open space), N/S/E/W or 0-3")
-	fac.add_argument("--spacing", type=float); fac.add_argument("--offset", type=float, default=0.8)
+	fac.add_argument("--spacing", type=float); fac.add_argument("--offset", type=float, default=0.3)
 	fac.add_argument("--levels", default="auto", help="'auto' = up to the building height, or a number")
 	fac.add_argument("--level-height", type=float); fac.add_argument("--heading-offset", type=float, default=0.0)
 	fac.add_argument("--margin", type=float, default=1.0); fac.add_argument("--max-levels", type=int, default=6)
 	fac.add_argument("--scan", type=Path, help="ground scan: 'auto' side faces the nearest road")
 	fac.add_argument("--building-model", type=int, help="only match this world model")
+	fac.add_argument("--min-run", type=int, default=3, help="drop wall runs shorter than this many bays")
+	fac.add_argument("--min-levels", type=int, default=2, help="skip walls lower than this many levels")
 	lintp = sub.add_parser("lint", help="Check a site: wall gaps, overlaps, world clashes, objects on tracks / roads")
 	lintp.add_argument("--site", type=Path, required=True, help="site JSON (perimeter, gates, scan...)")
 	lintp.add_argument("--json", type=Path, help="write the issue list here")
@@ -615,7 +670,8 @@ def main(argv: list[str] | None = None) -> int:
 				payload = bt.facade(service, args.x, args.y, args.model, side=args.side, spacing=args.spacing,
 				                    offset=args.offset, levels=int(args.levels) if str(args.levels).isdigit() else "auto",
 				                    level_height=args.level_height, heading_offset=args.heading_offset, margin=args.margin,
-				                    max_levels=args.max_levels, road_mask=mask, building_model=args.building_model)
+				                    max_levels=args.max_levels, road_mask=mask, building_model=args.building_model,
+				                    min_run=args.min_run, min_levels=args.min_levels)
 		elif args.command == "lint":
 			if __package__:
 				from . import lint as lint_mod

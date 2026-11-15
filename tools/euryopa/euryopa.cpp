@@ -995,6 +995,81 @@ GetGroundPlacementSurface(rw::V3d pos, rw::V3d *hitPos, rw::V3d *hitNormal, bool
 	return found;
 }
 
+// Bounds of the model's rendered mesh (all vertices of the highest-detail
+// atomic, or of every atomic in a clump, in model space). Some models draw
+// their walls well above the bottom of their collision box, so snapping on
+// collision alone makes them float. Needs the model loaded.
+bool
+GetRenderBounds(int objectId, rw::V3d *outMin, rw::V3d *outMax)
+{
+	ObjectDef *obj = GetObjectDef(objectId);
+	if(obj == nil || !obj->IsLoaded())
+		return false;
+	bool any = false;
+	rw::V3d mn = { 1e9f, 1e9f, 1e9f }, mx = { -1e9f, -1e9f, -1e9f };
+	auto addGeometry = [&](rw::Geometry *g, rw::Matrix *m){
+		if(g == nil || g->numMorphTargets < 1) return;
+		rw::V3d *v = g->morphTargets[0].vertices;
+		if(v == nil) return;
+		for(int i = 0; i < g->numVertices; i++){
+			rw::V3d p = v[i];
+			if(m) rw::V3d::transformPoints(&p, &p, 1, m);
+			mn.x = std::min(mn.x, p.x); mn.y = std::min(mn.y, p.y); mn.z = std::min(mn.z, p.z);
+			mx.x = std::max(mx.x, p.x); mx.y = std::max(mx.y, p.y); mx.z = std::max(mx.z, p.z);
+			any = true;
+		}
+	};
+	if(obj->m_type == ObjectDef::ATOMIC){
+		if(obj->m_atomics[0])
+			addGeometry(obj->m_atomics[0]->geometry, nil);
+	}else if(obj->m_clump){
+		FORLIST(lnk, obj->m_clump->atomics){
+			rw::Atomic *a = rw::Atomic::fromClump(lnk);
+			rw::Frame *f = a->getFrame();
+			addGeometry(a->geometry, f ? &f->matrix : nil);
+		}
+	}
+	if(!any) return false;
+	*outMin = mn; *outMax = mx;
+	return true;
+}
+
+// Lowest drawn vertex per cell of an n x n grid over the model's mesh XY bounds
+// (model space; NaN where a cell has no vertices). Lets the agent ground models
+// whose walls start at different heights (built for sloped sites).
+bool
+GetMeshBottomGrid(int objectId, int n, std::vector<float> *grid, rw::V3d *outMin, rw::V3d *outMax)
+{
+	if(n < 2 || n > 64 || !GetRenderBounds(objectId, outMin, outMax))
+		return false;
+	ObjectDef *obj = GetObjectDef(objectId);
+	grid->assign(n * n, NAN);
+	float sx = (outMax->x - outMin->x) / n, sy = (outMax->y - outMin->y) / n;
+	if(sx <= 0.0f || sy <= 0.0f) return false;
+	auto addGeometry = [&](rw::Geometry *g, rw::Matrix *m){
+		if(g == nil || g->numMorphTargets < 1 || g->morphTargets[0].vertices == nil) return;
+		rw::V3d *v = g->morphTargets[0].vertices;
+		for(int i = 0; i < g->numVertices; i++){
+			rw::V3d p = v[i];
+			if(m) rw::V3d::transformPoints(&p, &p, 1, m);
+			int cx = std::min(n - 1, std::max(0, (int)((p.x - outMin->x) / sx)));
+			int cy = std::min(n - 1, std::max(0, (int)((p.y - outMin->y) / sy)));
+			float &cell = (*grid)[cy * n + cx];
+			if(cell != cell || p.z < cell) cell = p.z;
+		}
+	};
+	if(obj->m_type == ObjectDef::ATOMIC){
+		if(obj->m_atomics[0]) addGeometry(obj->m_atomics[0]->geometry, nil);
+	}else if(obj->m_clump){
+		FORLIST(lnk, obj->m_clump->atomics){
+			rw::Atomic *a = rw::Atomic::fromClump(lnk);
+			rw::Frame *f = a->getFrame();
+			addGeometry(a->geometry, f ? &f->matrix : nil);
+		}
+	}
+	return true;
+}
+
 float
 GetPlacementBaseOffset(int objectId)
 {

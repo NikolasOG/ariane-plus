@@ -121,6 +121,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	track_ok = set(site.get("track_ok_models", [1423, 976, 988, 969, 975]))
 	debris = set(site.get("debris_models", []))       # rubble / broken walls / ruins: may pile into each other
 	floors = set(site.get("floor_models", [18981]))   # ground slabs (often tilted flat): others stand on them
+	dressing = set(site.get("dressing_models", [1426, 1436, 1464, 1465, 1466, 1467, 1469, 1519, 1521]))  # scaffolding etc. hugging walls
 	perimeter = [tuple(p) for p in site.get("perimeter", [])]
 	gates = site.get("gates", [])
 	fixed_zones = [[tuple(p) for p in z] for z in site.get("fixed_zones", [])]
@@ -250,7 +251,7 @@ def lint(service, site: dict, *, base_dir: Path | None = None) -> dict:
 	# 4. world clashes
 	for w in world:
 		for o in objs:
-			if o["a"] < 1.0 or o["m"] in floors or abs(o["x"] - w["x"]) > 30 or abs(o["y"] - w["y"]) > 30: continue
+			if o["a"] < 1.0 or o["m"] in floors or o["m"] in dressing or abs(o["x"] - w["x"]) > 30 or abs(o["y"] - w["y"]) > 30: continue
 			if _sat(o["q"], w["q"]):
 				ov = _inter_area(o["q"], w["q"])
 				if ov > 0.3:

@@ -1020,7 +1020,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -1189,6 +1189,13 @@ handleRequest(const std::vector<std::string> &lines)
 				",\"collision_bounds\":[[%.4f,%.4f,%.4f],[%.4f,%.4f,%.4f]]",
 				box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
 			body += bounds;
+		}
+		rw::V3d rmin, rmax;
+		if(GetRenderBounds(objectId, &rmin, &rmax)){
+			char rb[320];
+			snprintf(rb, sizeof(rb), ",\"render_bounds\":[[%.4f,%.4f,%.4f],[%.4f,%.4f,%.4f]]",
+				rmin.x, rmin.y, rmin.z, rmax.x, rmax.y, rmax.z);
+			body += rb;
 		}
 		body += "}";
 		writeResponse(requestId, true, body);
@@ -1960,6 +1967,31 @@ handleRequest(const std::vector<std::string> &lines)
 			std::to_string(removals) + ",\"message\":\"" + jsonEscape(message) + "\"";
 		if(!ok) body = std::string("\"error\":\"") + jsonEscape(message) + "\"," + body;
 		writeResponse(requestId, ok, body);
+		return;
+	}
+	if(command == "mesh_profile"){
+		// lowest drawn vertex per cell of an n x n grid over the mesh footprint
+		int objectId, n = 16;
+		ObjectDef *object = lines.size() > 2 ? resolveObject(lines[2], &objectId) : nil;
+		if(object == nil || (lines.size() > 3 && !parseInt(lines[3], &n))){
+			writeError(requestId, "mesh_profile requires a model and optional grid size (2-64)"); return;
+		}
+		RequestObject(objectId); LoadAllRequestedObjects();
+		std::vector<float> grid; rw::V3d mn, mx;
+		if(!GetMeshBottomGrid(objectId, n, &grid, &mn, &mx)){
+			writeError(requestId, "model mesh not available"); return;
+		}
+		std::string body = "\"model\":" + std::to_string(objectId) + ",\"n\":" + std::to_string(n);
+		char b[256];
+		snprintf(b, sizeof(b), ",\"bounds\":[[%.4f,%.4f,%.4f],[%.4f,%.4f,%.4f]],\"bottom\":[",
+			mn.x, mn.y, mn.z, mx.x, mx.y, mx.z);
+		body += b;
+		for(size_t i = 0; i < grid.size(); i++){
+			if(i) body += ",";
+			if(grid[i] != grid[i]) body += "null";
+			else { snprintf(b, sizeof(b), "%.3f", grid[i]); body += b; }
+		}
+		writeResponse(requestId, true, body + "]");
 		return;
 	}
 	if(command == "raycast_segment"){

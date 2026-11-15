@@ -107,6 +107,9 @@ SphereIntersect(const CSphere &sph, const Ray &ray)
 bool IntersectRayTriangle(const Ray &ray, rw::V3d a, rw::V3d b, rw::V3d c, float *t);
 bool IntersectRaySphere(const Ray &ray, const CSphere &sphere, float *t);
 bool IntersectRayColModel(const Ray &worldRay, ObjectInst *inst, rw::V3d *hitPos);
+bool GetRenderBounds(int objectId, rw::V3d *outMin, rw::V3d *outMax);
+#include <vector>
+bool GetMeshBottomGrid(int objectId, int n, std::vector<float> *grid, rw::V3d *outMin, rw::V3d *outMax);
 bool IntersectRayColModelSurface(const Ray &worldRay, ObjectInst *inst, const rw::Matrix *invMat, rw::V3d *hitPos, int *surface);
 extern bool gCameraOrtho;		// agent top-down capture: parallel projection
 extern float gCameraOrthoHalfWidth;
