@@ -1070,6 +1070,46 @@ GetMeshBottomGrid(int objectId, int n, std::vector<float> *grid, rw::V3d *outMin
 	return true;
 }
 
+// Visible triangle area facing each direction (+X,-X,+Y,-Y,+Z,-Z, model space).
+// GTA models are single-sided: a side with ~no area facing it is open (e.g. a
+// rubble heap modelled to lean against a wall shows nothing from behind).
+bool
+GetMeshSideAreas(int objectId, float out[6])
+{
+	ObjectDef *obj = GetObjectDef(objectId);
+	if(obj == nil || !obj->IsLoaded())
+		return false;
+	for(int k = 0; k < 6; k++) out[k] = 0.0f;
+	bool any = false;
+	auto addGeometry = [&](rw::Geometry *g, rw::Matrix *m){
+		if(g == nil || g->numMorphTargets < 1 || g->morphTargets[0].vertices == nil || g->triangles == nil) return;
+		rw::V3d *v = g->morphTargets[0].vertices;
+		for(int t = 0; t < g->numTriangles; t++){
+			rw::V3d a = v[g->triangles[t].v[0]], b = v[g->triangles[t].v[1]], c = v[g->triangles[t].v[2]];
+			if(m){ rw::V3d::transformPoints(&a, &a, 1, m); rw::V3d::transformPoints(&b, &b, 1, m); rw::V3d::transformPoints(&c, &c, 1, m); }
+			rw::V3d n = rw::cross(rw::sub(b, a), rw::sub(c, a));
+			float len = rw::length(n);
+			if(len < 1e-6f) continue;
+			float area = len * 0.5f;
+			n = rw::scale(n, 1.0f / len);
+			if(n.x > 0) out[0] += area * n.x; else out[1] -= area * n.x;
+			if(n.y > 0) out[2] += area * n.y; else out[3] -= area * n.y;
+			if(n.z > 0) out[4] += area * n.z; else out[5] -= area * n.z;
+			any = true;
+		}
+	};
+	if(obj->m_type == ObjectDef::ATOMIC){
+		if(obj->m_atomics[0]) addGeometry(obj->m_atomics[0]->geometry, nil);
+	}else if(obj->m_clump){
+		FORLIST(lnk, obj->m_clump->atomics){
+			rw::Atomic *a = rw::Atomic::fromClump(lnk);
+			rw::Frame *f = a->getFrame();
+			addGeometry(a->geometry, f ? &f->matrix : nil);
+		}
+	}
+	return any;
+}
+
 float
 GetPlacementBaseOffset(int objectId)
 {

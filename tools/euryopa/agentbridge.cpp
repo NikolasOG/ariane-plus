@@ -1190,6 +1190,13 @@ handleRequest(const std::vector<std::string> &lines)
 				box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
 			body += bounds;
 		}
+		float sides[6];
+		if(GetMeshSideAreas(objectId, sides)){
+			char sb[320];
+			snprintf(sb, sizeof(sb), ",\"mesh_side_area\":{\"+x\":%.2f,\"-x\":%.2f,\"+y\":%.2f,\"-y\":%.2f,\"up\":%.2f,\"down\":%.2f}",
+				sides[0], sides[1], sides[2], sides[3], sides[4], sides[5]);
+			body += sb;
+		}
 		rw::V3d rmin, rmax;
 		if(GetRenderBounds(objectId, &rmin, &rmax)){
 			char rb[320];

@@ -434,6 +434,8 @@ def main(argv: list[str] | None = None) -> int:
 	search.add_argument("--max-depth", type=float); search.add_argument("--has-collision", action="store_true")
 	search.add_argument("--include-lod", action="store_true"); search.add_argument("--limit", type=int, default=30)
 	search.add_argument("--include-hazards", action="store_true", help="also return explosive props (hidden by default)")
+	asides = asset_sub.add_parser("sides", help="Which sides of a model are actually drawn (open-backed models)")
+	asides.add_argument("asset_id", type=int)
 	smatch = asset_sub.add_parser("size-match", help="Models with a similar footprint (e.g. a ruin to replace a building)")
 	smatch.add_argument("width", type=float); smatch.add_argument("depth", type=float)
 	smatch.add_argument("--query", default=""); smatch.add_argument("--tolerance", type=float, default=0.25)
@@ -556,6 +558,17 @@ def main(argv: list[str] | None = None) -> int:
 						args.query, category=args.category, max_width=args.max_width,
 						max_depth=args.max_depth, has_collision=True if args.has_collision else None,
 						exclude_lod=not args.include_lod, limit=args.limit, include_hazards=args.include_hazards)}
+			elif args.asset_command == "sides":
+				service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+				a = service.probe_asset(args.asset_id, ensure_renderable=True)
+				areas = a.get("mesh_side_area") or {}
+				opposite = {"+x": "-x", "-x": "+x", "+y": "-y", "-y": "+y", "up": "down", "down": "up"}
+				open_sides = [k for k in ("+x", "-x", "+y", "-y")
+				              if areas and areas[k] < 0.15 * max(areas[opposite[k]], 1.0)]
+				payload = {"ok": True, "model": args.asset_id, "name": a.get("name"), "side_area_m2": areas,
+				           "open_sides": open_sides,
+				           "hint": "model-local: +y is the side facing the heading direction rotated by 90 (local +Y); "
+				                   "cover open sides or turn them against a wall"}
 			elif args.asset_command == "size-match":
 				if __package__:
 					from . import building_tools as bt
