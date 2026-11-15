@@ -1,0 +1,1537 @@
+{
+ "name": "watchtower_blocks",
+ "notes": "Wasteland watchtower built only from building blocks (blocks.py): 4 rusty pole legs, 4.4 m plank deck 4 m up, corrugated railings open toward -y, pitched corrugated roof, wooden ramp from -y, two crates, octagonal rust water tank on a footing at -x/+y. Rigid: placed as one piece on the ground under the origin (needs ~12 x 14 m of fairly flat ground; legs and footing sink 0.3-0.5 m into it).",
+ "parts": [
+  {
+   "model": 16101,
+   "dx": -1.8,
+   "dy": -1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "Gen_Rusty_Poll"
+    }
+   ],
+   "z": -4.5229
+  },
+  {
+   "model": 16101,
+   "dx": -1.8,
+   "dy": 1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "Gen_Rusty_Poll"
+    }
+   ],
+   "z": -4.5229
+  },
+  {
+   "model": 16101,
+   "dx": 1.8,
+   "dy": -1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "Gen_Rusty_Poll"
+    }
+   ],
+   "z": -4.5229
+  },
+  {
+   "model": 16101,
+   "dx": 1.8,
+   "dy": 1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "Gen_Rusty_Poll"
+    }
+   ],
+   "z": -4.5229
+  },
+  {
+   "model": 19789,
+   "dx": -4.4,
+   "dy": 3.4,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8961
+  },
+  {
+   "model": 19789,
+   "dx": -3.4,
+   "dy": 3.4,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8961
+  },
+  {
+   "model": 19789,
+   "dx": -2.8,
+   "dy": 1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8961
+  },
+  {
+   "model": 19789,
+   "dx": -2.8,
+   "dy": 2.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8961
+  },
+  {
+   "model": 19789,
+   "dx": -2.8,
+   "dy": 3.4,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8961
+  },
+  {
+   "model": 19789,
+   "dx": -4.4,
+   "dy": 1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8861
+  },
+  {
+   "model": 19789,
+   "dx": -4.4,
+   "dy": 2.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8861
+  },
+  {
+   "model": 19789,
+   "dx": -3.4,
+   "dy": 1.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8861
+  },
+  {
+   "model": 19789,
+   "dx": -3.4,
+   "dy": 2.8,
+   "heading": 0.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "concrete12"
+    }
+   ],
+   "z": -0.8861
+  },
+  {
+   "model": 19789,
+   "dx": 3.3,
+   "dy": -0.3,
+   "heading": 353.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "wood020"
+    }
+   ],
+   "z": -0.0227
+  },
+  {
+   "model": 19789,
+   "dx": 3.2,
+   "dy": 1.0,
+   "heading": 12.0,
+   "on": null,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 18633,
+     "color": "0x00000000",
+     "txd": "MatTextures",
+     "texture": "WoodPanel1"
+    }
+   ],
+   "z": -0.0083
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -5.5591,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 0.439
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -5.5662,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 0.446
+  },
+  {
+   "model": 19843,
+   "dx": -2.6487,
+   "dy": 2.6,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9273,
+   "dy": 3.2727,
+   "heading": 315.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 3.5513,
+   "heading": 0.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2726,
+   "dy": 3.2727,
+   "heading": 45.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.5513,
+   "dy": 2.6,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2726,
+   "dy": 1.9274,
+   "heading": 135.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 1.6487,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9273,
+   "dy": 1.9274,
+   "heading": 225.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 0.6139
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -4.8545,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 1.1487
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -4.8616,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 1.1557
+  },
+  {
+   "model": 19843,
+   "dx": -2.6487,
+   "dy": 2.6,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9273,
+   "dy": 3.2727,
+   "heading": 315.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 3.5513,
+   "heading": 0.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2726,
+   "dy": 3.2727,
+   "heading": 45.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.5513,
+   "dy": 2.6,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2726,
+   "dy": 1.9274,
+   "heading": 135.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 1.6487,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9273,
+   "dy": 1.9274,
+   "heading": 225.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.6139
+  },
+  {
+   "model": 19843,
+   "dx": -2.6387,
+   "dy": 2.6,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9203,
+   "dy": 3.2797,
+   "heading": 315.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 3.5613,
+   "heading": 0.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2797,
+   "dy": 3.2797,
+   "heading": 45.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -4.5613,
+   "dy": 2.6,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -4.2797,
+   "dy": 1.9203,
+   "heading": 135.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -3.6,
+   "dy": 1.6387,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -2.9203,
+   "dy": 1.9203,
+   "heading": 225.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12957,
+     "color": "0x00000000",
+     "txd": "sw_oldshack",
+     "texture": "rustc256128"
+    }
+   ],
+   "z": 1.8139
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -4.1499,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 1.8583
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -4.1571,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 1.8654
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -3.4454,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 2.568
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -3.4525,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 2.575
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -2.7408,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 3.2777
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -2.7479,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 3.2847
+  },
+  {
+   "model": 19843,
+   "dx": 0.1,
+   "dy": -2.4635,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 3.557
+  },
+  {
+   "model": 19843,
+   "dx": -0.1,
+   "dy": -2.4635,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -45.208,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood3"
+    }
+   ],
+   "z": 3.557
+  },
+  {
+   "model": 19353,
+   "dx": -0.5942,
+   "dy": 0.4498,
+   "heading": 269.992,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -89.95,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood2"
+    }
+   ],
+   "z": 3.8649
+  },
+  {
+   "model": 19353,
+   "dx": 0.5942,
+   "dy": -0.4498,
+   "heading": 269.992,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -89.95,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood2"
+    }
+   ],
+   "z": 3.8649
+  },
+  {
+   "model": 19353,
+   "dx": 0.5942,
+   "dy": 0.4498,
+   "heading": 269.992,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -89.95,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood2"
+    }
+   ],
+   "z": 3.8649
+  },
+  {
+   "model": 19353,
+   "dx": -0.5942,
+   "dy": -0.4498,
+   "heading": 269.992,
+   "on": null,
+   "pitch": 0.0,
+   "roll": -89.95,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 12921,
+     "color": "0x00000000",
+     "txd": "sw_farm1",
+     "texture": "sw_barnwood2"
+    }
+   ],
+   "z": 3.8749
+  },
+  {
+   "model": 19843,
+   "dx": -1.7,
+   "dy": 2.145,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -0.7,
+   "dy": 2.145,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 0.3,
+   "dy": 2.145,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 1.3,
+   "dy": 2.145,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 1.7,
+   "dy": 2.135,
+   "heading": 180.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": 0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -2.145,
+   "dy": -1.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -2.145,
+   "dy": -0.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -2.145,
+   "dy": 0.3,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -2.145,
+   "dy": 1.3,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": -2.135,
+   "dy": 1.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 2.195,
+   "dy": -1.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 2.195,
+   "dy": -0.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 2.195,
+   "dy": 0.3,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 2.195,
+   "dy": 1.3,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19843,
+   "dx": 2.205,
+   "dy": 1.7,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -0.0,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "ws_corr_metal3"
+    }
+   ],
+   "z": 4.4999
+  },
+  {
+   "model": 19426,
+   "dx": -0.7998,
+   "dy": -1.7777,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.482
+  },
+  {
+   "model": 19426,
+   "dx": 0.7998,
+   "dy": 1.7777,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.482
+  },
+  {
+   "model": 19426,
+   "dx": 0.7998,
+   "dy": -1.7819,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.4911
+  },
+  {
+   "model": 19426,
+   "dx": -0.7998,
+   "dy": 1.7819,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.4911
+  },
+  {
+   "model": 19426,
+   "dx": 0.7998,
+   "dy": -0.6896,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.9766
+  },
+  {
+   "model": 19426,
+   "dx": -0.7998,
+   "dy": -0.6896,
+   "heading": 270.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.9766
+  },
+  {
+   "model": 19426,
+   "dx": -0.7998,
+   "dy": 0.6896,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.9766
+  },
+  {
+   "model": 19426,
+   "dx": 0.7998,
+   "dy": 0.6896,
+   "heading": 90.0,
+   "on": null,
+   "pitch": 90.0,
+   "roll": -65.556,
+   "materials": [
+    {
+     "index": 0,
+     "kind": "texture",
+     "model": 16337,
+     "color": "0x00000000",
+     "txd": "des_quarrycrane",
+     "texture": "sw_corrugtile"
+    }
+   ],
+   "z": 6.9766
+  }
+ ],
+ "rigid": true
+}

@@ -94,11 +94,61 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 | `custom-models list/reload/add` | `custom_models_list/reload`, `custom_model_add` | AddSimpleModel models |
 | `samp-sync` | `samp_sync` | push to the server |
 | `samp-export --format streamer\|native\|wrapper` | `samp_export` | Pawn include file (open.mp and SA-MP share the native API) |
+| `blocks list/place/box/panel/room/beam/pole/ramp/roof/column` | `blocks_list`, `block_*` | building blocks: exact-size shapes to compose custom objects |
+| `prefab save --rigid` | `prefab_save(rigid=True)` | keep a composed object's exact 3D layout |
 | `checkpoint save/restore/list` | (service calls) | full snapshots incl. removals + materials |
 
 Python: the same functions live in `mapping_tools`, `ground`, `lint`,
 `prefabs`, `building_tools`, `materials`, `custom_models` (import them with an
 `ArianeService`).
+
+## Building blocks (custom objects)
+
+Compose your own objects (stalls, towers, shacks, tanks, signs, barricades)
+from plain stock SA-MP shapes, then retexture them. Every block has real
+collision and ONE material slot, so one material call retextures it and the
+result works in game without downloads. Module `blocks.py`.
+
+| Kind | Sizes (m) | Notes |
+| --- | --- | --- |
+| cube | 1, 5, 10 | pivot at the bottom face |
+| block | 1x1x5, 3x3x5, 5x5x5, 10x10x5, 10x1x5 | concrete |
+| beam / slab | 1x1x25 / 1x25x25 | |
+| panel | 1.61x3.5, 3.21x3.5, 9.63x3.5, 9.63x10.5 (0.18 thick), 5.94x5.1 (0.26) | many stock textures: `blocks list` shows `variants` |
+| panel_door / panel_window | 3.21x3.5 with a door / window hole; 5.94x5.1 with windows | |
+| plate | 1x1x0.05 | finest piece: thin sheets, signs, railings |
+| sheet | 6.25 (0.125), 12.5 (0.25), 25 (0.5) | big floors |
+| pole | 10.9 long | 0.24 m sleeve (bottom 5 m) + 0.12 m shaft (top 5.9 m) |
+
+Builders - every size is exact, pieces never stick out (except where noted):
+
+* `block_box` / `blocks box X Y Z W D H`: solid box centred on X Y Z, tiled from
+  the fewest pieces that fit; the last piece of a row is pulled back flush and
+  nudged 1 cm so overlapping faces never flicker. Thinnest square section is
+  1 m: a smaller box reports `overshoot` (use a panel, plate or pole instead).
+* `block_panel`: flat plate W x H (thickness along local Y), any rotation.
+* `block_room`: hollow shell standing on a floor height, optional ceiling and
+  door opening (`--door -y:1.4:2.2`).
+* `block_beam` (square) / `block_pole` (round): along a 3D line.
+* `block_ramp`: sloped plate between a low and a high edge (top surface).
+* `block_roof`: gable roof over a rectangle (eaves height, rise, overhang).
+* `block_column`: n-sided ring of panels (tanks, silos, towers).
+* `block_place`: one block centred where you say.
+
+Rotation: heading about Z, pitch about local X, roll about local Y
+(M = Rz(heading) Ry(roll) Rx(pitch)). Textures: a preset name or
+[model, txd, texture]; blank presets `white`, `grey`, `grey_light`,
+`grey_dark`, `black_flat`, `red`, `blue`, `green`, `yellow`, `orange` take any
+`color` cleanly, plus `samp_white`, `block_plain`, `concrete_plain`,
+`metal_plain`, `metal_scratched`, `steel_sheet`, `wood_panel`, `wood_plain` and
+all the wasteland presets. Plates and panels are the cheap pieces: think in
+1 m plates and 1.61/3.21/9.63 m panels when choosing sizes.
+
+Save the result with `prefab save NAME --ids ... --origin X Y H --rigid`
+(`prefab_save(rigid=True)`): rigid prefabs keep every part's exact offset and
+tilt and are placed as one piece on the ground under the new origin.
+Bundled example: `watchtower_blocks` (78 parts: pole legs, plank deck, railings,
+pitched roof, ramp, crates, water tank).
 
 ## 4. Site file (lint)
 

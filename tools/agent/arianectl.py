@@ -26,9 +26,9 @@ if __package__:
 else:
 	from service import ArianeService, ScenePatchError, DEFAULT_STATE_DIR
 if __package__:
-	from . import mapping_tools, materials, custom_models
+	from . import mapping_tools, materials, custom_models, blocks
 else:
-	import mapping_tools, materials, custom_models
+	import mapping_tools, materials, custom_models, blocks
 patch_in_chunks = mapping_tools.patch_in_chunks
 
 
@@ -122,6 +122,44 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	cma.add_argument("--base", type=int, required=True, help="stock model giving collision + flags")
 	cma.add_argument("--id", type=int, help="SA-MP id (default: next free from -1000 down)")
 	cma.add_argument("--world", type=int, default=-1)
+	blk = sub.add_parser("blocks", help="Building blocks: plain shapes (boxes, panels, beams, ramps, roofs, columns, "
+	                                     "poles) of exact size, retexturable - compose custom objects")
+	blk_sub = blk.add_subparsers(dest="blocks_command", required=True)
+	bl = blk_sub.add_parser("list"); bl.add_argument("--kind")
+	def tex_args(pp):
+		pp.add_argument("--texture", help="preset (white, grey, concrete, rusty_metal...) or model,txd,texture")
+		pp.add_argument("--color", help="ARGB tint, e.g. 0xFF8A6A4A")
+	def rot_args(pp):
+		pp.add_argument("--heading", type=float, default=0.0); pp.add_argument("--pitch", type=float, default=0.0)
+		pp.add_argument("--roll", type=float, default=0.0)
+	bp = blk_sub.add_parser("place", help="one block (model id, name or kind) centred on x y z")
+	bp.add_argument("block"); [bp.add_argument(n, type=float) for n in ("x", "y", "z")]; rot_args(bp); tex_args(bp)
+	bb = blk_sub.add_parser("box", help="solid box of exact size centred on x y z (width = local X, depth = Y)")
+	[bb.add_argument(n, type=float) for n in ("x", "y", "z", "width", "depth", "height")]; rot_args(bb); tex_args(bb)
+	bb.add_argument("--dry-run", action="store_true")
+	bpa = blk_sub.add_parser("panel", help="flat wall plate width x height centred on x y z")
+	[bpa.add_argument(n, type=float) for n in ("x", "y", "z", "width", "height")]
+	bpa.add_argument("--thickness", type=float, default=0.18); rot_args(bpa); tex_args(bpa)
+	br = blk_sub.add_parser("room", help="hollow shell standing on z_floor: walls, floor, optional ceiling and door")
+	[br.add_argument(n, type=float) for n in ("x", "y", "z_floor", "width", "depth", "height")]
+	br.add_argument("--heading", type=float, default=0.0); br.add_argument("--thickness", type=float, default=0.18)
+	br.add_argument("--no-floor", action="store_true"); br.add_argument("--ceiling", action="store_true")
+	br.add_argument("--door", help="side[:width[:height[:offset]]], side = -y|+y|-x|+x, e.g. -y:1.4:2.2"); tex_args(br)
+	bbe = blk_sub.add_parser("beam", help="square beam between two points")
+	[bbe.add_argument(n, type=float) for n in ("x0", "y0", "z0", "x1", "y1", "z1")]
+	bbe.add_argument("--thickness", type=float, default=0.25); bbe.add_argument("--width", type=float); tex_args(bbe)
+	bpo = blk_sub.add_parser("pole", help="round 0.19 m pole between two points (10.9 m pieces; a short one runs on past the start)")
+	[bpo.add_argument(n, type=float) for n in ("x0", "y0", "z0", "x1", "y1", "z1")]; tex_args(bpo)
+	bra = blk_sub.add_parser("ramp", help="sloped plate: low edge centre -> high edge centre (top surface), width across")
+	[bra.add_argument(n, type=float) for n in ("x0", "y0", "z0", "x1", "y1", "z1", "width")]
+	bra.add_argument("--thickness", type=float, default=0.18); tex_args(bra)
+	bro = blk_sub.add_parser("roof", help="gable roof over length x span, eaves at z_eave, ridge rise m higher")
+	[bro.add_argument(n, type=float) for n in ("x", "y", "z_eave", "length", "span", "rise")]
+	bro.add_argument("--heading", type=float, default=0.0); bro.add_argument("--thickness", type=float, default=0.18)
+	bro.add_argument("--overhang", type=float, default=0.3); tex_args(bro)
+	bco = blk_sub.add_parser("column", help="n-sided round column standing on z")
+	[bco.add_argument(n, type=float) for n in ("x", "y", "z", "radius", "height")]
+	bco.add_argument("--sides", type=int, default=8); bco.add_argument("--thickness", type=float, default=0.18); tex_args(bco)
 	witems = sub.add_parser("world-items", help="World (native) objects whose origin is inside a rectangle")
 	witems.add_argument("--bbox", required=True, help="x0,y0,x1,y1"); witems.add_argument("--out", type=Path, help="JSONL")
 	wrun = sub.add_parser("wall-run", help="Lay a gap-free wall (stacked containers + fence sections) along a polyline")
@@ -176,6 +214,10 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	psave.add_argument("--origin", type=float, nargs=3, metavar=("X", "Y", "HEADING"),
 	                   help="prefab origin + facing (default: first instance)")
 	psave.add_argument("--notes", default="")
+	psave.add_argument("--rigid", action="store_true",
+	                   help="keep every part's exact 3D offset/tilt (objects built from building blocks)")
+	psave.add_argument("--origin-z", type=float, help="rigid: height the part z offsets are measured from "
+	                                                   "(default: world ground under the origin)")
 	pplace = prefab_sub.add_parser("place"); pplace.add_argument("name", help="saved name or a .json path")
 	for n in ("x", "y", "heading"): pplace.add_argument(n, type=float)
 	pplace.add_argument("--no-snap", action="store_true")
@@ -652,7 +694,8 @@ def main(argv: list[str] | None = None) -> int:
 			if args.prefab_command == "list":
 				payload = {"ok": True, "prefabs": prefabs.list_prefabs(service)}
 			elif args.prefab_command == "save":
-				payload = prefabs.save_prefab(service, args.name, args.ids, tuple(args.origin) if args.origin else None, args.notes)
+				payload = prefabs.save_prefab(service, args.name, args.ids, tuple(args.origin) if args.origin else None, args.notes,
+				                              rigid=args.rigid, origin_z=args.origin_z)
 			else:
 				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
 				                               args.heading, snap=not args.no_snap, base_z=args.base_z)
@@ -701,6 +744,52 @@ def main(argv: list[str] | None = None) -> int:
 					                         args.cam_z, args.lod_mult, args.delay)
 				else:
 					payload = client.command("samp_sync", args.map or "-", int(args.force))
+		elif args.command == "blocks":
+			service = ArianeService(args.socket, args.db, max(args.timeout, 120.0), args.discovery_dir, args.state_dir)
+			c = args.blocks_command
+			tex = getattr(args, "texture", None)
+			if tex and "," in tex:
+				m_, t_, n_ = tex.split(",", 2); tex = (int(m_), t_, n_)
+			col = getattr(args, "color", None)
+			if c == "list":
+				payload = {"ok": True, "blocks": blocks.list_blocks(args.kind)}
+			elif c == "place":
+				payload = {"ok": True, "instance_id": blocks.place_block(service, args.block, args.x, args.y, args.z,
+				           heading=args.heading, pitch=args.pitch, roll=args.roll, texture=tex, color=col)}
+			elif c == "box":
+				payload = blocks.build_box(service, args.x, args.y, args.z, args.width, args.depth, args.height,
+				                           heading=args.heading, pitch=args.pitch, roll=args.roll, texture=tex, color=col,
+				                           dry_run=args.dry_run)
+			elif c == "panel":
+				payload = blocks.build_panel(service, args.x, args.y, args.z, args.width, args.height,
+				                             thickness=args.thickness, heading=args.heading, pitch=args.pitch,
+				                             roll=args.roll, texture=tex, color=col)
+			elif c == "room":
+				door = None
+				if args.door:
+					f = args.door.split(":")
+					door = {"side": f[0]}
+					for k, v in zip(("width", "height", "offset"), f[1:]):
+						door[k] = float(v)
+				payload = blocks.build_room(service, args.x, args.y, args.z_floor, args.width, args.depth, args.height,
+				                            heading=args.heading, thickness=args.thickness, floor=not args.no_floor,
+				                            ceiling=args.ceiling, door=door, texture=tex, color=col)
+			elif c == "beam":
+				payload = blocks.build_beam(service, (args.x0, args.y0, args.z0), (args.x1, args.y1, args.z1),
+				                            thickness=args.thickness, width=args.width, texture=tex, color=col)
+			elif c == "pole":
+				payload = blocks.build_pole(service, (args.x0, args.y0, args.z0), (args.x1, args.y1, args.z1),
+				                            texture=tex, color=col)
+			elif c == "ramp":
+				payload = blocks.build_ramp(service, (args.x0, args.y0, args.z0), (args.x1, args.y1, args.z1), args.width,
+				                            thickness=args.thickness, texture=tex, color=col)
+			elif c == "roof":
+				payload = blocks.build_roof(service, args.x, args.y, args.z_eave, args.length, args.span, args.rise,
+				                            heading=args.heading, thickness=args.thickness, overhang=args.overhang,
+				                            texture=tex, color=col)
+			else:
+				payload = blocks.build_column(service, args.x, args.y, args.z, args.radius, args.height, sides=args.sides,
+				                              thickness=args.thickness, texture=tex, color=col)
 		elif args.command == "custom-models":
 			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
 			if args.custom_command == "list":

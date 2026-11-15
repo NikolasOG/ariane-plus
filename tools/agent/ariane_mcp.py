@@ -722,12 +722,12 @@ def inspect_placement_anchors(asset_id: int) -> dict:
 
 if __package__:
 	from . import mapping_tools, ground as ground_mod, lint as lint_mod, prefabs as prefab_mod
-	from . import building_tools, materials as material_mod, custom_models as custom_mod
+	from . import building_tools, materials as material_mod, custom_models as custom_mod, blocks as blocks_mod
 	from .ariane_ipc import ArianeClient
 	from .asset_index import AssetIndex
 else:
 	import mapping_tools, ground as ground_mod, lint as lint_mod, prefabs as prefab_mod
-	import building_tools, materials as material_mod, custom_models as custom_mod
+	import building_tools, materials as material_mod, custom_models as custom_mod, blocks as blocks_mod
 	from ariane_ipc import ArianeClient
 	from asset_index import AssetIndex
 
@@ -902,10 +902,13 @@ def prefab_list() -> dict:
 
 
 @mcp.tool()
-def prefab_save(name: str, instance_ids: list[int], origin: list[float] | None = None, notes: str = "") -> dict:
-	"""Save placed objects as a reusable prefab (stacking and material overrides are kept). origin [x, y, heading]
-	defaults to the first instance."""
-	return prefab_mod.save_prefab(service, name, instance_ids, tuple(origin) if origin else None, notes)
+def prefab_save(name: str, instance_ids: list[int], origin: list[float] | None = None, notes: str = "",
+                rigid: bool = False, origin_z: float | None = None) -> dict:
+	"""Save placed objects as a reusable prefab (stacking, tilt and material overrides are kept). origin [x, y,
+	heading] defaults to the first instance. rigid=True for objects built from building blocks: every part keeps
+	its exact 3D offset (z from the ground under the origin, or origin_z) and the prefab is placed as one piece."""
+	return prefab_mod.save_prefab(service, name, instance_ids, tuple(origin) if origin else None, notes,
+	                              rigid=rigid, origin_z=origin_z)
 
 
 @mcp.tool()
@@ -1070,6 +1073,108 @@ def custom_model_add(server_dir: str, dff_path: str, txd_path: str, base_id: int
 	id from -1000 down unless given) and load it. base_id = stock model whose collision/flags it uses in game."""
 	return custom_mod.add_simple_model(service, server_dir, dff_path, txd_path, base_id=base_id, samp_id=samp_id,
 	                                   world=world)
+
+
+# ---------------------------------------------------------------- building blocks
+Texture = str | list | None
+
+
+def _tex(texture):
+	"""preset name, or [model, txd, texture]"""
+	return tuple(texture) if isinstance(texture, list) else texture
+
+
+@mcp.tool()
+def blocks_list(kind: str | None = None) -> dict:
+	"""Building blocks: plain stock SA-MP shapes with collision and ONE material slot (retexture slot 0) - cube,
+	block, beam, slab, panel, panel_door, panel_window, plate, sheet, pole - with exact sizes and pivots. Prefer the
+	block_* builders, which pick and tile pieces for an exact size."""
+	return {"ok": True, "blocks": blocks_mod.list_blocks(kind)}
+
+
+@mcp.tool()
+def block_place(block: str, x: float, y: float, z: float, heading: float = 0.0, pitch: float = 0.0, roll: float = 0.0,
+                texture: Texture = None, color: str | None = None) -> dict:
+	"""One block (model id, name or kind) with its box centred on (x, y, z). Rotation: heading about Z, pitch about
+	local X, roll about local Y. texture: preset (white, grey, concrete, rusty_metal... see texture_presets) or
+	[model, txd, texture]; color: ARGB tint, e.g. '0xFF8A6A4A' (blank presets take any colour)."""
+	return {"ok": True, "instance_id": blocks_mod.place_block(service, block, x, y, z, heading=heading, pitch=pitch,
+	                                                          roll=roll, texture=_tex(texture), color=color)}
+
+
+@mcp.tool()
+def block_box(x: float, y: float, z: float, width: float, depth: float, height: float, heading: float = 0.0,
+              pitch: float = 0.0, roll: float = 0.0, texture: Texture = None, color: str | None = None,
+              dry_run: bool = False) -> dict:
+	"""Solid box of EXACT width (local X) x depth (local Y) x height (local Z) centred on (x, y, z), tiled from the
+	fewest stock pieces that fit (no piece sticks out; the last of a row is pulled back flush). Floors, plinths,
+	counters, crates, slabs, thick walls. Thinnest square section is 1 m - 'overshoot' reports when a piece is
+	bigger than asked (use a panel/pole instead)."""
+	return blocks_mod.build_box(service, x, y, z, width, depth, height, heading=heading, pitch=pitch, roll=roll,
+	                            texture=_tex(texture), color=color, dry_run=dry_run)
+
+
+@mcp.tool()
+def block_panel(x: float, y: float, z: float, width: float, height: float, thickness: float = 0.18,
+                heading: float = 0.0, pitch: float = 0.0, roll: float = 0.0, texture: Texture = None,
+                color: str | None = None) -> dict:
+	"""Flat plate width (local X) x height (local Z), thickness along local Y, centred on (x, y, z): walls, doors,
+	signs, partitions; pitch=90 lays it flat (or use block_box)."""
+	return blocks_mod.build_panel(service, x, y, z, width, height, thickness=thickness, heading=heading, pitch=pitch,
+	                              roll=roll, texture=_tex(texture), color=color)
+
+
+@mcp.tool()
+def block_room(x: float, y: float, z_floor: float, width: float, depth: float, height: float, heading: float = 0.0,
+               thickness: float = 0.18, floor: bool = True, ceiling: bool = False, door: dict | None = None,
+               texture: Texture = None, color: str | None = None) -> dict:
+	"""Hollow shell standing on z_floor: four walls (outer size), optional floor and ceiling.
+	door = {"side": "-y"|"+y"|"-x"|"+x", "width": 1.4, "height": 2.2, "offset": 0} leaves an opening."""
+	return blocks_mod.build_room(service, x, y, z_floor, width, depth, height, heading=heading, thickness=thickness,
+	                             floor=floor, ceiling=ceiling, door=door, texture=_tex(texture), color=color)
+
+
+@mcp.tool()
+def block_beam(start: list[float], end: list[float], thickness: float = 0.25, width: float | None = None,
+               texture: Texture = None, color: str | None = None) -> dict:
+	"""Square beam along the centre line start [x,y,z] -> end: rafters, braces, frames (min section 0.18 m, panel
+	on edge; 1 m blocks above that)."""
+	return blocks_mod.build_beam(service, tuple(start), tuple(end), thickness=thickness, width=width,
+	                             texture=_tex(texture), color=color)
+
+
+@mcp.tool()
+def block_pole(start: list[float], end: list[float], texture: Texture = None, color: str | None = None) -> dict:
+	"""Steel pole start -> end: posts, railings, pipes. One piece is 10.9 m: a shorter pole ends at `end` and runs
+	on past `start` (put start in the ground or inside a block). Its bottom 5 m is a 0.24 m square sleeve, the top
+	5.9 m a thin 0.12 m shaft: up to 5.9 m only the shaft shows, longer ones show the sleeve as a footing collar."""
+	return blocks_mod.build_pole(service, tuple(start), tuple(end), texture=_tex(texture), color=color)
+
+
+@mcp.tool()
+def block_ramp(low: list[float], high: list[float], width: float, thickness: float = 0.18, texture: Texture = None,
+               color: str | None = None) -> dict:
+	"""Sloped plate whose TOP surface runs from the low edge centre to the high edge centre; width across the
+	slope. Ramps, stairs boards, lean-to roofs, awnings."""
+	return blocks_mod.build_ramp(service, tuple(low), tuple(high), width, thickness=thickness, texture=_tex(texture),
+	                             color=color)
+
+
+@mcp.tool()
+def block_roof(x: float, y: float, z_eave: float, length: float, span: float, rise: float, heading: float = 0.0,
+               thickness: float = 0.18, overhang: float = 0.3, texture: Texture = None, color: str | None = None) -> dict:
+	"""Gable roof over a length (local X) x span (local Y) rectangle centred on (x, y): two slopes from the eaves at
+	z_eave to a ridge `rise` higher, overhanging by `overhang`. Gable ends stay open (add panels)."""
+	return blocks_mod.build_roof(service, x, y, z_eave, length, span, rise, heading=heading, thickness=thickness,
+	                             overhang=overhang, texture=_tex(texture), color=color)
+
+
+@mcp.tool()
+def block_column(x: float, y: float, z: float, radius: float, height: float, sides: int = 8, thickness: float = 0.18,
+                 texture: Texture = None, color: str | None = None) -> dict:
+	"""Round column: a ring of `sides` panels, outer radius `radius`, standing on z: silos, tanks, towers, pillars."""
+	return blocks_mod.build_column(service, x, y, z, radius, height, sides=sides, thickness=thickness,
+	                               texture=_tex(texture), color=color)
 
 
 # ---------------------------------------------------------------- server

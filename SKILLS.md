@@ -107,6 +107,20 @@ Only simple single-mesh models work, and collision comes from the base model.
 removes the listed models. Get the ids from `world-items` first. Removals
 are kept in checkpoints and sync as `RemoveBuildingForPlayer`.
 
+### Build a custom object from blocks
+```
+blocks list                 blocks_list()                              # shapes and exact sizes
+blocks box --texture barn_wood -- X Y Z 4.4 4.4 0.25                   # block_box: a deck
+blocks pole --texture rusty_pole -- X0 Y0 Zground X0 Y0 Ztop           # block_pole: legs / posts
+blocks panel --thickness 0.05 --texture corrugated_metal -- X Y Z 4.4 1 # block_panel: railings
+blocks roof --texture corrugated_tile -- X Y Zeave 4.4 4.4 1.0         # block_roof
+blocks ramp --texture barn_wood_dark -- X0 Y0 Z0 X1 Y1 Z1 1.2          # block_ramp
+blocks column --sides 8 --texture rusty_metal -- X Y Z 1.1 2.2         # block_column: tank
+prefab save my_tower --ids ... --origin X Y 0 --rigid                  # prefab_save(rigid=True)
+```
+Blank presets (`white`, `grey`...) plus `--color 0xFF8A6A4A` give any plain
+colour. Example to copy: `prefab place watchtower_blocks X Y HEADING`.
+
 ## 4. Habits that save time
 
 * **Dry-run first**: `wall-run`, `pack` and `settle` take `--dry-run`. Read the

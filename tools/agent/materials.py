@@ -55,6 +55,25 @@ TEXTURE_PRESETS: dict[str, dict[str, Any]] = {
 	"container_red":      {"model": 2934, "txd": "continX", "texture": "frate64_red"},
 	"container_blue":     {"model": 2934, "txd": "continX", "texture": "frate64_blue"},
 	"container_yellow":   {"model": 2934, "txd": "continX", "texture": "frate64_yellow"},
+	# blank surfaces for building blocks: plain colours that take any ARGB tint
+	"white":              {"model": 18646, "txd": "MatColours", "texture": "white", "note": "tint with any colour"},
+	"grey":               {"model": 18646, "txd": "MatColours", "texture": "grey"},
+	"grey_light":         {"model": 18646, "txd": "MatColours", "texture": "grey-20-percent"},
+	"grey_dark":          {"model": 18646, "txd": "MatColours", "texture": "grey-80-percent"},
+	"black_flat":         {"model": 18646, "txd": "MatColours", "texture": "black"},
+	"red":                {"model": 18646, "txd": "MatColours", "texture": "red"},
+	"blue":               {"model": 18646, "txd": "MatColours", "texture": "blue"},
+	"green":              {"model": 18646, "txd": "MatColours", "texture": "green"},
+	"yellow":             {"model": 18646, "txd": "MatColours", "texture": "yellow"},
+	"orange":             {"model": 18646, "txd": "MatColours", "texture": "orange"},
+	"samp_white":         {"model": 18633, "txd": "MatTextures", "texture": "SAMPWhite"},
+	"block_plain":        {"model": 18633, "txd": "MatTextures", "texture": "block"},
+	"concrete_plain":     {"model": 18633, "txd": "MatTextures", "texture": "concrete12"},
+	"metal_plain":        {"model": 18633, "txd": "MatTextures", "texture": "metal1_128"},
+	"metal_scratched":    {"model": 18633, "txd": "MatTextures", "texture": "scratchedmetal"},
+	"steel_sheet":        {"model": 18633, "txd": "MatTextures", "texture": "ab_sheetSteel"},
+	"wood_panel":         {"model": 18633, "txd": "MatTextures", "texture": "WoodPanel1"},
+	"wood_plain":         {"model": 18633, "txd": "MatTextures", "texture": "wood020"},
 }
 
 
