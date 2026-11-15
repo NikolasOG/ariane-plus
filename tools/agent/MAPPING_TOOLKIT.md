@@ -4,6 +4,9 @@ Everything here works the same from the CLI (`arianectl ...`) and from the MCP
 connector (`ariane-mcp`, tool names in the second column). The connector's
 `mapping_toolkit_guide` tool returns this file.
 
+First time? Start with `SKILLS.md` at the repository root: a preflight check,
+the build loop and ready-made recipes. This file is the full reference.
+
 ## 0. Setup checklist
 
 | Need | How |

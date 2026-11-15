@@ -34,6 +34,12 @@ SA-MP / open.mp server without ever touching your game's IPL files.
   custom gamemode picks it up within ~3 s) and, optionally,
   `gamemodes/wasteland/maps/<name>.inc`.
 
+## Mapping with an AI agent
+Point an agent at [`SKILLS.md`](SKILLS.md) first: preflight checks, the build loop and
+recipes for walls, settlements, ruins, retexturing and custom models. The full reference
+is [`tools/agent/MAPPING_TOOLKIT.md`](tools/agent/MAPPING_TOOLKIT.md); workspace setup is in
+[`tools/agent/scripts/README.md`](tools/agent/scripts/README.md).
+
 ## Rotations
 SA-MP uses GTA's `CMatrix::SetRotate(x, y, z)` = `Rz·Rx·Ry`. Ariane stores quaternions;
 the conversion self-calibrates against `ObjectInst::UpdateMatrix` on first use (see the log).
