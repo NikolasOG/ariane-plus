@@ -121,7 +121,7 @@ def place_prefab(service, prefab: dict, x: float, y: float, heading: float, *, s
 		z = parts[i].get("z", 0.0)
 		if base_z is not None:
 			b = service.probe_asset(parts[i]["model"], ensure_renderable=True).get("collision_bounds")
-			z = base_z - (b[0][2] if b else 0.0) + 0.02
+			z = base_z - (b[0][2] if b else 0.0) + 0.02 - float(parts[i].get("z_sink", 0.0))
 		ops.append({"action": "place", "key": keys[i], "model": parts[i]["model"], "x": wx, "y": wy,
 		            "z": z, "heading": wh, "snap": snap})
 	service.apply_scene_patch(ops)

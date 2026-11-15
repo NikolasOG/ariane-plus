@@ -85,7 +85,10 @@ def settle_objects(service, client, args) -> dict:
 				g = ground(wx, wy, z + bz + 1.0)
 				if g is None: continue
 				for k in edge: sides[k].append(z + bz - g)
-		meds = [sorted(v)[len(v) // 4] for v in sides.values() if v]   # 25th percentile: wall bottoms, not window gaps / corner footings
+		if getattr(args, "edge_stat", "p25") == "max":
+			meds = [max(v) for v in sides.values() if v]               # every edge on the ground
+		else:
+			meds = [sorted(v)[len(v) // 4] for v in sides.values() if v]   # 25th percentile: wall bottoms, not window gaps / corner footings
 		return max(meds) if meds else None
 	def footprint(it, grow=0.0):
 		b = bounds(it["model_id"])
@@ -221,6 +224,9 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	                    help="ground the drawn walls of buildings (not vehicles / open structures): per side, compare the mesh bottom with the "
 	                         "terrain (25th percentile per side) and sink by the worst side - for models built for sloped sites")
 	settle.add_argument("--max-sink", type=float, default=3.0)
+	settle.add_argument("--edge-stat", choices=("p25", "max"), default="p25",
+	                    help="--visual: p25 = typical wall bottom per side (buildings); max = every edge must touch "
+	                         "the ground (mounds, heaps, slabs)")
 	settle.add_argument("--floor-models", type=int, nargs="*", default=[18981, 19543, 19544, 19545],
 	                    help="placed models that count as ground (slabs, ground planes)")
 	gscan = sub.add_parser("ground-scan",
