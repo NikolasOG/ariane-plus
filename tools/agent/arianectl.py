@@ -272,6 +272,10 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	rep.add_argument("--dy", type=float, default=0.0)
 	rep.add_argument("--dz", type=float, help="fixed height offset (default: snap to ground)")
 	rep.add_argument("--keep-old", action="store_true", help="place the model without removing the building")
+	rep.add_argument("--wire-poles", action="store_true",
+	                 help="plant a pole at each wire end left hanging over the old footprint")
+	wends = sub.add_parser("wire-ends", help="Wire ends hanging over a rectangle (x0,y0,x1,y1 at ground z)")
+	wends.add_argument("--box", required=True, help="x0,y0,x1,y1"); wends.add_argument("--ground-z", type=float, required=True)
 	fac = sub.add_parser("facade", help="Line one side of the world building at x,y with a model (scaffolding, rubble...)")
 	fac.add_argument("x", type=float); fac.add_argument("y", type=float); fac.add_argument("model", type=int)
 	fac.add_argument("--side", default="auto", help="auto (faces the road / open space), N/S/E/W or 0-3")
@@ -670,6 +674,14 @@ def main(argv: list[str] | None = None) -> int:
 			elif args.checkpoint_command == "list": payload = checkpoint_service.checkpoint_list()
 			elif args.checkpoint_command == "save": payload = checkpoint_service.checkpoint_save(args.name)
 			else: payload = checkpoint_service.checkpoint_restore(args.name)
+		elif args.command == "wire-ends":
+			if __package__:
+				from . import building_tools as bt
+			else:
+				import building_tools as bt
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			x0, y0, x1, y1 = (float(v) for v in args.box.split(","))
+			payload = {"ok": True, "ends": bt.wire_ends(service, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], args.ground_z)}
 		elif args.command in {"replace-building", "facade"}:
 			if __package__:
 				from . import building_tools as bt, ground
@@ -679,7 +691,7 @@ def main(argv: list[str] | None = None) -> int:
 			if args.command == "replace-building":
 				payload = bt.replace_building(service, args.x, args.y, args.model, old_model=args.old_model,
 				                              heading_offset=args.heading_offset, dx=args.dx, dy=args.dy, dz=args.dz,
-				                              keep_old=args.keep_old)
+				                              keep_old=args.keep_old, wire_poles=args.wire_poles)
 			else:
 				mask = None
 				if args.scan:

@@ -81,7 +81,7 @@ def suppress_building(service, it) -> dict:
 
 
 def replace_building(service, x, y, new_model, *, old_model=None, heading_offset=0.0, dx=0.0, dy=0.0,
-                     dz=None, snap=True, keep_old=False) -> dict:
+                     dz=None, snap=True, keep_old=False, wire_poles=False) -> dict:
 	it = find_world_building(service, x, y, model=old_model)
 	if not it:
 		raise ValueError("no world building found there")
@@ -122,8 +122,62 @@ def replace_building(service, x, y, new_model, *, old_model=None, heading_offset
 	      "snap": snap and z_fixed is None}
 	service.apply_scene_patch([op])
 	placed = next((i for i in service.enumerate_scene() if i.get("object_key") == op["key"]), None)
-	return {"ok": True, "replaced": {"model_id": it["model_id"], "name": it.get("name"), "position": it["position"],
-	                                 "heading": h}, "removed": removed, "ground_slabs": len(slabs), "placed": placed}
+	result = {"ok": True, "replaced": {"model_id": it["model_id"], "name": it.get("name"), "position": it["position"],
+	                                   "heading": h}, "removed": removed, "ground_slabs": len(slabs), "placed": placed}
+	if removed and ob:
+		(ax, ay, az), (bx, by, _) = ob
+		quad = [(px + lx * c - ly * s, py + lx * s + ly * c) for lx, ly in ((ax, ay), (bx, ay), (bx, by), (ax, by))]
+		ends = wire_ends(service, quad, pz + az)
+		result["dangling_wire_ends"] = ends
+		if ends and wire_poles:
+			pb = _visual_bottom(service, WIRE_POLE)
+			ground = pz + az - (0.12 if slabs else 0.0)
+			service.apply_scene_patch([{"action": "place", "key": f"wirepole:{uuid.uuid4().hex[:10]}", "model": WIRE_POLE,
+			                            "x": e[0], "y": e[1], "z": ground - pb, "heading": 0.0, "snap": False} for e in ends])
+			result["wire_poles"] = len(ends)
+	return result
+
+
+DETAIL_KEYS = ("alpha", "bit", "wire", "teline", "cable")
+WIRE_POLE = 1308       # telgrphpole02, the wooden pole used along the desert towns' streets
+
+
+def wire_ends(service, quad, ground_z, low=2.0, high=12.0, search=90.0) -> list[list[float]]:
+	"""Wire / cable ends left hanging over a footprint: drawn vertices of nearby
+	detail models (alpha bits, wire meshes) inside the footprint, 2-12 m up.
+	A removed building's service drop is drawn in such shared detail models, so
+	it can't be removed on its own - give its end something to land on."""
+	xs = [p[0] for p in quad]; ys = [p[1] for p in quad]
+	cx, cy = sum(xs) / 4, sum(ys) / 4
+	page = service.engine("inspect_zone_page", [cx, cy, search, 0, 256])
+	pts = []
+	for it in page["items"]:
+		if it.get("agent_scene") or not any(k in str(it.get("name", "")).lower() for k in DETAIL_KEYS):
+			continue
+		r = service.engine("mesh_points", [it["instance_id"], min(xs), min(ys), ground_z + low,
+		                                   max(xs), max(ys), ground_z + high, 4000])
+		for x, y, z in r.get("points", []):
+			if _inside_quad(x, y, quad):
+				pts.append((x, y, z))
+	ends = []                                   # cluster ribbon vertices (same x,y, z and z+1)
+	for x, y, z in sorted(pts):
+		for e in ends:
+			if math.hypot(e[0] - x, e[1] - y) < 0.8:
+				e[2] = min(e[2], z); break
+		else:
+			ends.append([x, y, z])
+	return [[round(e[0], 2), round(e[1], 2), round(e[2], 2)] for e in ends]
+
+
+def _inside_quad(px, py, quad):
+	sign = None
+	for i in range(4):
+		(x1, y1), (x2, y2) = quad[i], quad[(i + 1) % 4]
+		cr = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+		if abs(cr) < 1e-9: continue
+		if sign is None: sign = cr > 0
+		elif (cr > 0) != sign: return False
+	return True
 
 
 SLAB = 18981          # SA-MP Concrete1mx25mx25m: modelled upright (1 m thick along X) -> roll 90 to lie flat

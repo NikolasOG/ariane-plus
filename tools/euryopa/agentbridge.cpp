@@ -1020,7 +1020,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"mesh_points\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -1999,6 +1999,50 @@ handleRequest(const std::vector<std::string> &lines)
 			else { snprintf(b, sizeof(b), "%.3f", grid[i]); body += b; }
 		}
 		writeResponse(requestId, true, body + "]");
+		return;
+	}
+	if(command == "mesh_points"){
+		// world-space drawn vertices of one instance inside an axis-aligned world box
+		// (instance_id x0 y0 z0 x1 y1 z1 [max]) - e.g. find where a wire ends
+		int id, maxPts = 4000; float b[6];
+		if(lines.size() < 9 || !parseInt(lines[2], &id)){
+			writeError(requestId, "mesh_points requires instance_id x0 y0 z0 x1 y1 z1 [max]"); return;
+		}
+		for(int k = 0; k < 6; k++) if(!parseFloat(lines[3 + k], &b[k])){ writeError(requestId, "invalid box"); return; }
+		if(lines.size() > 9) parseInt(lines[9], &maxPts);
+		ObjectInst *inst = nil;
+		for(CPtrNode *p = instances.first; p; p = p->next){
+			ObjectInst *it = (ObjectInst*)p->item;
+			if(it->m_id == id){ inst = it; break; }
+		}
+		ObjectDef *obj = inst ? GetObjectDef(inst->m_objectId) : nil;
+		if(obj == nil){ writeError(requestId, "unknown instance"); return; }
+		RequestObject(inst->m_objectId); LoadAllRequestedObjects();
+		inst->UpdateMatrix();
+		std::string pts; int n = 0;
+		auto addGeometry = [&](rw::Geometry *g, rw::Matrix *local){
+			if(g == nil || g->numMorphTargets < 1 || g->morphTargets[0].vertices == nil) return;
+			rw::V3d *v = g->morphTargets[0].vertices;
+			for(int i = 0; i < g->numVertices && n < maxPts; i++){
+				rw::V3d q = v[i];
+				if(local) rw::V3d::transformPoints(&q, &q, 1, local);
+				rw::V3d::transformPoints(&q, &q, 1, &inst->m_matrix);
+				if(q.x < b[0] || q.y < b[1] || q.z < b[2] || q.x > b[3] || q.y > b[4] || q.z > b[5]) continue;
+				char t[64]; snprintf(t, sizeof(t), "%s[%.2f,%.2f,%.2f]", n ? "," : "", q.x, q.y, q.z);
+				pts += t; n++;
+			}
+		};
+		if(obj->m_type == ObjectDef::ATOMIC){
+			if(obj->m_atomics[0]) addGeometry(obj->m_atomics[0]->geometry, nil);
+		}else if(obj->m_clump){
+			FORLIST(lnk, obj->m_clump->atomics){
+				rw::Atomic *a = rw::Atomic::fromClump(lnk);
+				rw::Frame *f = a->getFrame();
+				addGeometry(a->geometry, f ? &f->matrix : nil);
+			}
+		}
+		writeResponse(requestId, true, std::string("\"instance_id\":") + std::to_string(id) +
+			",\"model\":\"" + jsonEscape(obj->m_name) + "\",\"count\":" + std::to_string(n) + ",\"points\":[" + pts + "]");
 		return;
 	}
 	if(command == "raycast_segment"){
