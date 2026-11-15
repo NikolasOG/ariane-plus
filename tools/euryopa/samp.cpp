@@ -28,6 +28,16 @@
 // ------------------------------------------------------------------ state
 
 bool gSampProtectGameFiles = true;
+bool gSampAllowWorldRemoval;			// pick world buildings outside the opened IPL, to remove them
+static bool gSampAskWorldRemoval = true;	// confirm before removing world buildings
+static bool gOpenConfirmWorldRemoval;
+// Show in game: which players the server moves (written into scriptfiles/ariane_goto.txt)
+enum { GOTO_RCON, GOTO_SCRIPT, GOTO_PLAYER, GOTO_ALL };
+static int gSampGotoWho = GOTO_RCON;
+static char gSampGotoPlayer[32];
+static const char *kGotoModes[] = { "rcon", "script", "player", "all" };
+// server -> editor: a script calls Ariane_FocusEditor(At) (ariane.inc), Ariane moves its camera there
+static bool gSampFollowFocus = true;
 
 static GameFile *gSampFile;
 static int gSampIplCounter;
@@ -731,6 +741,85 @@ IsStockInst(ObjectInst *inst)
 	return inst && inst->m_file && !SampIsLayerInst(inst) && inst->m_savedStateValid;
 }
 
+// A game building (deleting it means a RemoveBuildingForPlayer), as opposed to an object of the
+// SA-MP layer, an agent's scene or another map opened from disk.
+bool
+SampIsWorldBuilding(ObjectInst *inst)
+{
+	if(!IsStockInst(inst) || inst->m_file->name == nil || IsExternalIplMapLogicalPath(inst->m_file->name))
+		return false;
+	return !(IsIplMapDocumentOpen() && IsIplMapDocumentExternal() && IsInstInIplMapDocument(inst));
+}
+
+// Selectable although outside the opened IPL: removal only (moves skip it, see FindOrAddLinkedTransformGroup)
+bool
+SampCanPickWorldBuilding(ObjectInst *inst)
+{
+	return gSampProtectGameFiles && gSampAllowWorldRemoval && !IsInstInIplMapDocument(inst) &&
+	       SampIsWorldBuilding(inst);
+}
+
+static void
+SetWorldRemoval(bool allow)
+{
+	gSampAllowWorldRemoval = allow;
+	if(!allow){
+		// drop picked world buildings: they'd sit in the selection, uneditable
+		std::vector<ObjectInst*> picked;
+		for(CPtrNode *p = selection.first; p; p = p->next)
+			if(!IsInstInIplMapDocument((ObjectInst*)p->item))
+				picked.push_back((ObjectInst*)p->item);
+		for(size_t i = 0; i < picked.size(); i++)
+			picked[i]->Deselect();
+	}
+	Toast(TOAST_SELECTION, allow ?
+		"World buildings can be selected and removed (exported as RemoveBuildingForPlayer)" :
+		"World buildings outside the opened IPL are locked again");
+}
+
+static void
+CountSelectionForDelete(int *total, int *world)
+{
+	*total = *world = 0;
+	for(CPtrNode *p = selection.first; p; p = p->next){
+		ObjectInst *inst = (ObjectInst*)p->item;
+		if(inst->m_isDeleted)
+			continue;
+		(*total)++;
+		if(gSampProtectGameFiles && SampIsWorldBuilding(inst))
+			(*world)++;
+	}
+}
+
+static void
+DoDeleteSelection(void)
+{
+	int total, world;
+	CountSelectionForDelete(&total, &world);
+	if(total == 0)
+		return;
+	DeleteSelected(true);
+	if(world == 0)
+		Toast(TOAST_DELETE, "Deleted %d instance(s)", total < MAX_BATCH_OBJECTS ? total : MAX_BATCH_OBJECTS);
+	else if(world == total)
+		Toast(TOAST_DELETE, "Removed %d world building(s): exported as RemoveBuildingForPlayer", world);
+	else
+		Toast(TOAST_DELETE, "Deleted %d object(s) and removed %d world building(s)", total - world, world);
+}
+
+void
+SampDeleteSelection(void)
+{
+	int total, world;
+	CountSelectionForDelete(&total, &world);
+	if(total == 0)
+		return;
+	if(world > 0 && gSampAskWorldRemoval)
+		gOpenConfirmWorldRemoval = true;
+	else
+		DoDeleteSelection();
+}
+
 // Applies a RemoveBuildingForPlayer to the loaded world. Returns instances hidden.
 static int
 ApplyRemoval(int model, float x, float y, float z, float radius)
@@ -1402,6 +1491,14 @@ LoadSettings(void)
 		else if(strncmp(line, "incdir=", 7) == 0) strncpy(gSampIncDir, line + 7, sizeof(gSampIncDir) - 1);
 		else if(strncmp(line, "autoinc=", 8) == 0) gSampAutoInc = atoi(line + 8) != 0;
 		else if(strncmp(line, "protect=", 8) == 0) gSampProtectGameFiles = atoi(line + 8) != 0;
+		else if(strncmp(line, "worldremove=", 12) == 0) gSampAllowWorldRemoval = atoi(line + 12) != 0;
+		else if(strncmp(line, "askremove=", 10) == 0) gSampAskWorldRemoval = atoi(line + 10) != 0;
+		else if(strncmp(line, "gotowho=", 8) == 0){
+			for(int m = 0; m < 4; m++)
+				if(strcmp(line + 8, kGotoModes[m]) == 0) gSampGotoWho = m;
+		}
+		else if(strncmp(line, "gotoplayer=", 11) == 0) strncpy(gSampGotoPlayer, line + 11, sizeof(gSampGotoPlayer) - 1);
+		else if(strncmp(line, "followfocus=", 12) == 0) gSampFollowFocus = atoi(line + 12) != 0;
 	}
 	fclose(f);
 }
@@ -1418,6 +1515,9 @@ SaveSettings(void)
 	fprintf(f, "server=%s\nmap=%s\nformat=%d\nautoinc=%d\nprotect=%d\n",
 		gSampServerDir, gSampMapName, gSampExportFormat, gSampAutoInc ? 1 : 0, gSampProtectGameFiles ? 1 : 0);
 	fprintf(f, "prefix=%s\nincdir=%s\n", gSampWrapPrefix, gSampIncDir);
+	fprintf(f, "worldremove=%d\naskremove=%d\n", gSampAllowWorldRemoval ? 1 : 0, gSampAskWorldRemoval ? 1 : 0);
+	fprintf(f, "gotowho=%s\ngotoplayer=%s\n", kGotoModes[gSampGotoWho], gSampGotoPlayer);
+	fprintf(f, "followfocus=%d\n", gSampFollowFocus ? 1 : 0);
 	fclose(f);
 }
 
@@ -1699,6 +1799,11 @@ SampShortcuts(bool allowEditorShortcuts)
 	if(CPad::IsKeyJustDown('L')) SampRequestReload();
 	if(CPad::IsKeyJustDown('P')) gOpenExport = true;
 	if(CPad::IsKeyJustDown('C')) SampCopySelectionAsPawn();
+	if(CPad::IsKeyJustDown('T')) SampShowInGame();
+	if(CPad::IsKeyJustDown('W') && gSampProtectGameFiles){
+		SetWorldRemoval(!gSampAllowWorldRemoval);
+		SaveSettings();
+	}
 #ifdef _WIN32
 	if(CPad::IsKeyJustDown('O')) SampImportDialog();
 #endif
@@ -1738,6 +1843,18 @@ SampMenu(void)
 		ImGui::SetTooltip("On: new objects go to the SA-MP layer, deleting/moving stock buildings\n"
 		                  "becomes RemoveBuildingForPlayer, and Save/Hot Reload can't touch your IPLs.\n"
 		                  "Turning it off and saving would write layer deletions into the game files.");
+	if(ImGui::MenuItem("Allow removing world buildings", "Ctrl+Shift+W", gSampAllowWorldRemoval, gSampProtectGameFiles)){
+		SetWorldRemoval(!gSampAllowWorldRemoval);
+		SaveSettings();
+	}
+	if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Lets you select game buildings outside the opened IPL (for example while an agent's\n"
+		                  "map is open) and remove them with Delete. They export as RemoveBuildingForPlayer;\n"
+		                  "they can't be moved or edited, and no IPL file is changed. Needs SA-MP mode.");
+	if(ImGui::MenuItem("Ask before removing world buildings", nil, gSampAskWorldRemoval, gSampProtectGameFiles)){
+		gSampAskWorldRemoval = !gSampAskWorldRemoval;
+		SaveSettings();
+	}
 	ImGui::Separator();
 #ifdef _WIN32
 	if(ImGui::MenuItem("Import SA-MP / MTA map...", "Ctrl+Shift+O"))
@@ -1751,10 +1868,54 @@ SampMenu(void)
 	StylesSelectionMenu();
 	ImGui::Separator();
 	if(ImGui::MenuItem("Sync to server", "Ctrl+Shift+S")) SampSyncToServer();
+	if(ImGui::MenuItem("Show in game", "Ctrl+Shift+T")) SampShowInGame();
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("Sync, then move players who are in game to this view (the camera's target).\n"
+		                  "Who moves is set under 'Show in game moves'. Needs tools/samp/ariane_live.pwn\n"
+		                  "or a gamemode that reads scriptfiles/ariane_goto.txt.");
+	if(ImGui::BeginMenu("Show in game moves")){
+		static const char *labels[] = { "Admins logged in with RCON", "Players the server script picks",
+			"One player", "Everyone on the server" };
+		static const char *tips[] = {
+			"Players who typed /rcon login <password> in game. Works on any server\nwith tools/samp/ariane_live.pwn loaded.",
+			"The server decides: a gamemode or filterscript defines\n  forward Ariane_CanFollow(playerid);\n"
+			"  public Ariane_CanFollow(playerid) return <your admin check>;\nand players it returns 1 for are moved.",
+			"Only the player with this name (or id).",
+			"Every connected player. Only for a local test server." };
+		for(int m = 0; m < 4; m++){
+			if(ImGui::MenuItem(labels[m], nil, gSampGotoWho == m)){
+				gSampGotoWho = m;
+				SaveSettings();
+			}
+			if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tips[m]);
+		}
+		ImGui::SetNextItemWidth(180);
+		if(ImGui::InputTextWithHint("##gotoplayer", "player name or id", gSampGotoPlayer, sizeof(gSampGotoPlayer),
+		                            ImGuiInputTextFlags_CharsNoBlank)){
+			if(gSampGotoPlayer[0]) gSampGotoWho = GOTO_PLAYER;
+			SaveSettings();
+		}
+		ImGui::EndMenu();
+	}
+	if(ImGui::MenuItem("Follow the server's focus requests", nil, gSampFollowFocus)){
+		gSampFollowFocus = !gSampFollowFocus;
+		SaveSettings();
+	}
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("When a server script calls Ariane_FocusEditor(playerid) or Ariane_FocusEditorAt(x, y, z)\n"
+		                  "(ariane.inc; /arianefocus in the bundled filterscript), the camera flies there.");
 	if(ImGui::MenuItem("Reload from server", "Ctrl+Shift+L")) SampRequestReload();
 	if(ImGui::IsItemHovered())
 		ImGui::SetTooltip("Replace the SA-MP layer with what the server is running now\n(scriptfiles/ariane_live.txt from the last sync).");
 	if(ImGui::MenuItem("Server folder...")) gOpenServer = true;
+	ImGui::Separator();
+	if(ImGui::MenuItem("Removed buildings...")) SampOpenRemovedWindow();
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("Every game building the map removes, nearest first: fly to it or restore it.");
+	if(ImGui::MenuItem("Checks...")) SampOpenChecksWindow();
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("Find floating objects, objects on roads or dirt tracks, explosive props,\n"
+		                  "duplicates and object-limit problems.");
 	ImGui::Separator();
 	if(ImGui::MenuItem("Clear SA-MP layer")) ClearLayer();
 	ImGui::EndMenu();
@@ -1767,6 +1928,55 @@ SampPopups(void)
 	if(gOpenServer){ ImGui::OpenPopup("SA-MP server"); gOpenServer = false; }
 	if(gOpenConfirmEmptySync){ ImGui::OpenPopup("Sync an empty layer?"); gOpenConfirmEmptySync = false; }
 	if(gOpenConfirmReload){ ImGui::OpenPopup("Reload from server?"); gOpenConfirmReload = false; }
+	if(gOpenConfirmWorldRemoval){ ImGui::OpenPopup("Remove world buildings?"); gOpenConfirmWorldRemoval = false; }
+
+	if(ImGui::BeginPopupModal("Remove world buildings?", nil, ImGuiWindowFlags_AlwaysAutoResize)){
+		std::vector<ObjectInst*> world;
+		int others = 0;
+		for(CPtrNode *p = selection.first; p; p = p->next){
+			ObjectInst *inst = (ObjectInst*)p->item;
+			if(inst->m_isDeleted) continue;
+			if(SampIsWorldBuilding(inst)) world.push_back(inst);
+			else others++;
+		}
+		static bool dontAsk = false;
+		if(world.empty())
+			ImGui::CloseCurrentPopup();	// selection changed meanwhile
+		ImGui::Text("Remove %d world building%s from the map?", (int)world.size(), world.size() == 1 ? "" : "s");
+		ImGui::Spacing();
+		for(size_t i = 0; i < world.size() && i < 8; i++){
+			ObjectDef *obj = GetObjectDef(world[i]->m_objectId);
+			ImGui::BulletText("%s (%d)  at %.1f, %.1f, %.1f", obj ? obj->m_name : "?", world[i]->m_objectId,
+				world[i]->m_translation.x, world[i]->m_translation.y, world[i]->m_translation.z);
+		}
+		if(world.size() > 8)
+			ImGui::TextDisabled("...and %d more", (int)world.size() - 8);
+		if(others > 0)
+			ImGui::Text("%d other selected object%s will be deleted as well.", others, others == 1 ? "" : "s");
+		ImGui::Spacing();
+		ImGui::TextDisabled("They're hidden here and exported as RemoveBuildingForPlayer, together with\n"
+		                    "their far-away LOD models. Your game's IPL files are not changed.\n"
+		                    "Ctrl+Z brings them back.");
+		ImGui::Spacing();
+		ImGui::Checkbox("Don't ask again", &dontAsk);
+		ImGui::SetItemTooltip("Turn it back on in SA-MP > Ask before removing world buildings");
+		ImGui::Spacing();
+		if(ImGui::Button("Remove", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)){
+			if(dontAsk){
+				gSampAskWorldRemoval = false;
+				SaveSettings();
+			}
+			dontAsk = false;
+			DoDeleteSelection();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if(ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)){
+			dontAsk = false;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
 
 	if(ImGui::BeginPopupModal("Sync an empty layer?", nil, ImGuiWindowFlags_AlwaysAutoResize)){
 		ImGui::Text("Your SA-MP layer is empty, but the server is running %d objects/removals.", gPendingServerEntries);
@@ -2070,4 +2280,822 @@ SampCustomModelsJson(void)
 		s += "}";
 	}
 	return s + "]";
+}
+
+// ================================================================== SA-MP windows
+//
+// Removed Buildings (every RemoveBuildingForPlayer the map makes, with Go to / Restore), SA-MP Checks
+// (common mapping mistakes, each with Go to / Select), Show in game, and the material editor in Object Info.
+
+#include "icons.h"
+#include <algorithm>
+#include <unordered_map>
+#include <chrono>
+#include <set>
+
+static bool gShowRemovedWindow, gShowChecksWindow;
+
+void SampOpenRemovedWindow(void) { gShowRemovedWindow = true; }
+void SampOpenChecksWindow(void) { gShowChecksWindow = true; }
+
+static bool
+ContainsNoCase(const char *hay, const char *needle)
+{
+	if(needle == nil || needle[0] == '\0') return true;
+	if(hay == nil) return false;
+	size_t n = strlen(needle);
+	for(const char *h = hay; *h; h++){
+		size_t i = 0;
+		while(i < n && h[i] && tolower((unsigned char)h[i]) == tolower((unsigned char)needle[i])) i++;
+		if(i == n) return true;
+	}
+	return false;
+}
+
+static void
+FlyTo(ObjectInst *inst, rw::V3d pos)
+{
+	if(inst && GetObjectDef(inst->m_objectId) && GetObjectDef(inst->m_objectId)->m_colModel)
+		inst->JumpTo();
+	else{
+		TheCamera.setTarget(pos);
+		TheCamera.setDistanceFromTarget(30.0f);
+	}
+}
+
+// Put a removed game building back, with the far-away LOD its removal took along.
+static void
+RestoreWorldBuilding(ObjectInst *inst)
+{
+	if(inst == nil || !inst->m_isDeleted)
+		return;
+	inst->m_isDeleted = false;
+	StampChangeSeq(inst);
+	ObjectInst *lod = inst->m_lod;
+	if(lod && lod->m_isDeleted && IsStockInst(lod)){
+		lod->m_isDeleted = false;
+		StampChangeSeq(lod);
+	}
+}
+
+static void
+RemovedBuildingsWindow(void)
+{
+	if(!gShowRemovedWindow)
+		return;
+	ImGui::SetNextWindowSize(ImVec2(620, 460), ImGuiCond_FirstUseEver);
+	if(!ImGui::Begin(ICON_FA_TRASH " Removed Buildings", &gShowRemovedWindow)){
+		ImGui::End();
+		return;
+	}
+	static char filter[64] = "";
+	static bool showLods = false;
+	static std::set<ObjectInst*> picked;	// highlighted rows (removed buildings aren't in the viewport selection)
+	static ObjectInst *anchor;			// shift-click range start
+	static int pickedRaw = -1;
+	struct Row { ObjectInst *inst; float dist; bool lod; };
+	std::vector<Row> rows;
+	int buildings = 0, lods = 0;
+	rw::V3d cam = TheCamera.m_position;
+	for(CPtrNode *p = instances.first; p; p = p->next){
+		ObjectInst *inst = (ObjectInst*)p->item;
+		if(!inst->m_isDeleted || !IsStockInst(inst))
+			continue;
+		bool isLod = inst->m_numChildren > 0;
+		if(isLod) lods++; else buildings++;
+		if(isLod && !showLods)
+			continue;
+		ObjectDef *obj = GetObjectDef(inst->m_objectId);
+		char idText[16];
+		snprintf(idText, sizeof(idText), "%d", inst->m_objectId);
+		if(filter[0] && !ContainsNoCase(obj ? obj->m_name : "", filter) && strstr(idText, filter) == nil)
+			continue;
+		Row r = { inst, length(sub(inst->m_translation, cam)), isLod };
+		rows.push_back(r);
+	}
+	std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b){ return a.dist < b.dist; });
+	// forget picks that were restored or filtered out
+	std::vector<ObjectInst*> pickedRows;
+	for(size_t i = 0; i < rows.size(); i++)
+		if(picked.count(rows[i].inst))
+			pickedRows.push_back(rows[i].inst);
+	picked = std::set<ObjectInst*>(pickedRows.begin(), pickedRows.end());
+	int n = (int)pickedRows.size();
+
+	ImGui::Text("%d removed building%s", buildings, buildings == 1 ? "" : "s");
+	ImGui::SameLine();
+	ImGui::TextDisabled("(+%d LOD model%s, removed with them) - each exports as RemoveBuildingForPlayer",
+		lods, lods == 1 ? "" : "s");
+
+	// toolbar: acts on the highlighted rows
+	ImGui::BeginDisabled(n == 0);
+	if(ImGui::Button("Go to"))
+		FlyTo(pickedRows[0], pickedRows[0]->m_translation);
+	ImGui::SetItemTooltip("Fly to the first highlighted building (double-click a row does the same)");
+	ImGui::SameLine();
+	char restoreLabel[32];
+	snprintf(restoreLabel, sizeof(restoreLabel), n > 1 ? "Restore %d" : "Restore", n);
+	if(ImGui::Button(restoreLabel)){
+		for(size_t i = 0; i < pickedRows.size(); i++)
+			RestoreWorldBuilding(pickedRows[i]);
+		Toast(TOAST_DELETE, "Restored %d building(s): they're no longer removed in the export", n);
+		picked.clear();
+	}
+	ImGui::SetItemTooltip("Put the highlighted buildings back (and their LODs). Players already on the\n"
+	                      "server only see them again after they reconnect.");
+	ImGui::EndDisabled();
+	ImGui::SameLine(0, 16);
+	ImGui::SetNextItemWidth(200);
+	ImGui::InputTextWithHint("##filter", "Filter by name or id", filter, sizeof(filter));
+	ImGui::SameLine();
+	ImGui::Checkbox("LOD models", &showLods);
+
+	float footer = ImGui::GetTextLineHeightWithSpacing() * (gRawRemovals.empty() ? 1.2f : 2.6f);
+	if(ImGui::BeginTable("##removed", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+	                     ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable,
+	                     ImVec2(0, -footer))){
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableSetupColumn("Model", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Distance", ImGuiTableColumnFlags_WidthFixed, 70);
+		ImGui::TableSetupColumn("Position", ImGuiTableColumnFlags_WidthFixed, 160);
+		ImGui::TableHeadersRow();
+		int clicked = -1;
+		bool doubleClicked = false;
+		ImGuiListClipper clipper;
+		clipper.Begin((int)rows.size());
+		while(clipper.Step())
+			for(int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++){
+				ObjectInst *inst = rows[i].inst;
+				ObjectDef *obj = GetObjectDef(inst->m_objectId);
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				char label[128];
+				snprintf(label, sizeof(label), "%s (%d)%s##%p", obj ? obj->m_name : "?", inst->m_objectId,
+					rows[i].lod ? "  LOD" : "", (void*)inst);
+				if(ImGui::Selectable(label, picked.count(inst) != 0,
+				                     ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)){
+					clicked = i;
+					doubleClicked = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+				}
+				ImGui::TableNextColumn();
+				ImGui::Text("%.0f m", rows[i].dist);
+				ImGui::TableNextColumn();
+				ImGui::TextDisabled("%.1f, %.1f, %.1f", inst->m_translation.x, inst->m_translation.y, inst->m_translation.z);
+			}
+		ImGui::EndTable();
+		if(clicked >= 0){
+			ObjectInst *inst = rows[clicked].inst;
+			ImGuiIO &io = ImGui::GetIO();
+			if(io.KeyShift && anchor){
+				int a = -1;
+				for(int i = 0; i < (int)rows.size(); i++) if(rows[i].inst == anchor) a = i;
+				if(a >= 0){
+					if(!io.KeyCtrl) picked.clear();
+					for(int i = a < clicked ? a : clicked; i <= (a < clicked ? clicked : a); i++)
+						picked.insert(rows[i].inst);
+				}
+			}else if(io.KeyCtrl){
+				if(picked.count(inst)) picked.erase(inst); else picked.insert(inst);
+				anchor = inst;
+			}else{
+				picked.clear();
+				picked.insert(inst);
+				anchor = inst;
+			}
+			if(doubleClicked)
+				FlyTo(inst, inst->m_translation);
+		}
+	}
+	ImGui::TextDisabled("Click highlights, Ctrl+click adds, Shift+click a range, double-click flies there.");
+	if(!gRawRemovals.empty()){
+		ImGui::Text("%d imported removal%s match no building Ariane loaded (kept for export)",
+			(int)gRawRemovals.size(), gRawRemovals.size() == 1 ? "" : "s");
+		ImGui::SameLine();
+		if(ImGui::SmallButton("Show"))
+			ImGui::OpenPopup("##rawremovals");
+		if(ImGui::BeginPopup("##rawremovals")){
+			if(pickedRaw >= (int)gRawRemovals.size()) pickedRaw = -1;
+			ImGui::BeginDisabled(pickedRaw < 0);
+			if(ImGui::Button("Go to")){
+				const SampRawRemoval &r = gRawRemovals[pickedRaw];
+				rw::V3d p = { r.x, r.y, r.z };
+				FlyTo(nil, p);
+			}
+			ImGui::SameLine();
+			if(ImGui::Button("Drop")){
+				gRawRemovals.erase(gRawRemovals.begin() + pickedRaw);
+				pickedRaw = -1;
+			}
+			ImGui::SetItemTooltip("Stop exporting this removal");
+			ImGui::EndDisabled();
+			for(size_t i = 0; i < gRawRemovals.size(); i++){
+				const SampRawRemoval &r = gRawRemovals[i];
+				char label[128];
+				snprintf(label, sizeof(label), "model %d at %.1f, %.1f, %.1f (radius %.1f)##raw%d",
+					r.model, r.x, r.y, r.z, r.radius, (int)i);
+				if(ImGui::Selectable(label, pickedRaw == (int)i, ImGuiSelectableFlags_DontClosePopups |
+				                     ImGuiSelectableFlags_AllowDoubleClick)){
+					pickedRaw = (int)i;
+					if(ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)){
+						rw::V3d p = { r.x, r.y, r.z };
+						FlyTo(nil, p);
+					}
+				}
+			}
+			ImGui::EndPopup();
+		}
+	}
+	ImGui::End();
+}
+
+// ------------------------------------------------------------------ checks
+
+enum { CHK_FLOATING, CHK_ROAD, CHK_TRACK, CHK_EXPLOSIVE, CHK_DUPLICATE, CHK_LIMIT, CHK_DENSITY, CHK_NOTDRAWN, NUM_CHECKS };
+static const char *kCheckNames[NUM_CHECKS] = {
+	"Floating", "On a road", "On a dirt track", "Explosive prop", "Duplicate", "Object limit", "Streamer density", "Not drawn"
+};
+static const char *kCheckHelp[NUM_CHECKS] = {
+	"Nothing under the object within 35 cm: it hangs in the air (or over water).",
+	"Stands on tarmac: vehicles drive into it.",
+	"Stands on a dirt track (DIRTTRACK surface).",
+	"Explodes when shot or hit (1225 barrel, 1370 flame drum).",
+	"Two copies of the same model at the same spot: they flicker (z-fighting) and cost an object slot.",
+	"More objects than CreateObject allows on SA-MP (1000): export with the streamer format instead.",
+	"More objects within 300 m than the streamer shows at once by default (500): distant ones pop in late.",
+	"Objects with models Ariane can't draw: kept and exported as they are, but not checked.",
+};
+static bool gCheckEnabled[NUM_CHECKS] = { true, true, true, true, true, true, true, true };
+
+struct CheckIssue { int kind; ObjectInst *inst; rw::V3d pos; std::string msg; };
+static std::vector<CheckIssue> gIssues;
+static bool gChecksRan;
+static double gChecksMs;
+static int gChecksObjects;
+
+static bool
+IsRoadSurface(int s) { return s >= 1 && s <= 3; }	// TARMAC, TARMAC_FUCKED, TARMAC_REALLYFUCKED (surfinfo.dat)
+static bool
+IsTrackSurface(int s) { return s == 27; }			// DIRTTRACK
+
+static void
+RunChecks(void)
+{
+	std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+	gIssues.clear();
+	gChecksRan = true;
+	// barriers and gate parts are meant to stand on roads and tracks
+	static const int kRoadOk[] = { 1423, 976, 988, 969, 975, 1228, 1237, 1238, 1282, 1459, 3091 };
+	// may hang in the air: ground slabs laid as the ground itself, and dressing that hugs walls (scaffolding...)
+	static const int kFloatOk[] = { 18981, 19543, 19544, 19545, 19650, 19700, 19741,
+		1426, 1436, 1464, 1465, 1466, 1467, 1469, 1519, 1521 };
+	std::vector<ObjectInst*> objs;
+	for(CPtrNode *p = instances.first; p; p = p->next){
+		ObjectInst *inst = (ObjectInst*)p->item;
+		if(SampIsLayerInst(inst) && !inst->m_isDeleted && inst->m_numChildren == 0)
+			objs.push_back(inst);
+	}
+	gChecksObjects = (int)objs.size();
+	char msg[256];
+	std::unordered_map<long long, std::vector<ObjectInst*>> cells;
+
+	for(size_t i = 0; i < objs.size(); i++){
+		ObjectInst *inst = objs[i];
+		ObjectDef *obj = GetObjectDef(inst->m_objectId);
+		const char *name = obj ? obj->m_name : "?";
+		inst->UpdateMatrix();
+
+		if(inst->m_objectId == 1225 || inst->m_objectId == 1370){
+			snprintf(msg, sizeof(msg), "%s (%d) explodes when shot", name, inst->m_objectId);
+			gIssues.push_back({ CHK_EXPLOSIVE, inst, inst->m_translation, msg });
+		}
+
+		// duplicates: same model within 5 cm and the same rotation
+		long long key = ((long long)inst->m_objectId << 40) ^
+			((long long)floorf(inst->m_translation.x * 20.0f) * 73856093LL) ^
+			((long long)floorf(inst->m_translation.y * 20.0f) * 19349663LL) ^
+			((long long)floorf(inst->m_translation.z * 20.0f) * 83492791LL);
+		std::vector<ObjectInst*> &cell = cells[key];
+		for(size_t k = 0; k < cell.size(); k++){
+			ObjectInst *o = cell[k];
+			rw::Quat a = inst->m_rotation, b = o->m_rotation;
+			float dq = fabsf(a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w);
+			if(length(sub(o->m_translation, inst->m_translation)) < 0.05f && dq > 0.9999f){
+				snprintf(msg, sizeof(msg), "%s (%d) placed twice at the same spot", name, inst->m_objectId);
+				gIssues.push_back({ CHK_DUPLICATE, inst, inst->m_translation, msg });
+				break;
+			}
+		}
+		cell.push_back(inst);
+
+		if(obj == nil || obj->m_colModel == nil)
+			continue;
+		CColModel *col = obj->m_colModel;
+		bool solid = col->numBoxes > 0 || col->numSpheres > 0 || col->numTriangles > 0;
+		bool doFloat = gCheckEnabled[CHK_FLOATING] && solid &&
+			std::find(std::begin(kFloatOk), std::end(kFloatOk), inst->m_objectId) == std::end(kFloatOk);
+		bool doGround = isSA() && (gCheckEnabled[CHK_ROAD] || gCheckEnabled[CHK_TRACK]) &&
+			std::find(std::begin(kRoadOk), std::end(kRoadOk), inst->m_objectId) == std::end(kRoadOk);
+		if(!doFloat && !doGround)
+			continue;
+
+		// bottom of the collision box in the world, and five points under it (centre + corners pulled in 25%)
+		CBox &bb = obj->m_colModel->boundingBox;
+		rw::V3d corners[8], world[8];
+		for(int c = 0; c < 8; c++){
+			corners[c].x = c & 1 ? bb.max.x : bb.min.x;
+			corners[c].y = c & 2 ? bb.max.y : bb.min.y;
+			corners[c].z = c & 4 ? bb.max.z : bb.min.z;
+		}
+		rw::V3d::transformPoints(world, corners, 8, &inst->m_matrix);
+		float minZ = world[0].z;
+		for(int c = 1; c < 8; c++) minZ = fminf(minZ, world[c].z);
+		rw::V3d local[5], samples[5];
+		rw::V3d mid = { (bb.min.x + bb.max.x) * 0.5f, (bb.min.y + bb.max.y) * 0.5f, bb.min.z };
+		local[0] = mid;
+		for(int c = 0; c < 4; c++){
+			local[c + 1].x = mid.x + ((c & 1 ? bb.max.x : bb.min.x) - mid.x) * 0.75f;
+			local[c + 1].y = mid.y + ((c & 2 ? bb.max.y : bb.min.y) - mid.y) * 0.75f;
+			local[c + 1].z = bb.min.z;
+		}
+		rw::V3d::transformPoints(samples, local, 5, &inst->m_matrix);
+
+		if(doFloat){
+			float bestGap = 1.0e30f;
+			for(int s = 0; s < 5; s++){
+				rw::V3d from = { samples[s].x, samples[s].y, minZ + 1.0f };
+				float hz;
+				if(SurfaceBelow(inst, from, false, &hz, nil, nil))
+					bestGap = fminf(bestGap, minZ - hz);
+			}
+			if(bestGap > 0.35f){
+				if(bestGap >= 1.0e29f)
+					snprintf(msg, sizeof(msg), "%s (%d) has nothing below it", name, inst->m_objectId);
+				else
+					snprintf(msg, sizeof(msg), "%s (%d) floats %.2f m above what's below", name, inst->m_objectId, bestGap);
+				gIssues.push_back({ CHK_FLOATING, inst, inst->m_translation, msg });
+			}
+		}
+		if(doGround){
+			int road = 0, track = 0;
+			bool centreRoad = false, centreTrack = false;
+			for(int s = 0; s < 5; s++){
+				rw::V3d from = { samples[s].x, samples[s].y, minZ + 1.0f };
+				int surface = -1;
+				if(!SurfaceBelow(inst, from, true, nil, &surface, nil))
+					continue;
+				if(IsRoadSurface(surface)){ road++; if(s == 0) centreRoad = true; }
+				if(IsTrackSurface(surface)){ track++; if(s == 0) centreTrack = true; }
+			}
+			if(gCheckEnabled[CHK_ROAD] && (centreRoad || road >= 2)){
+				snprintf(msg, sizeof(msg), "%s (%d) stands on a road", name, inst->m_objectId);
+				gIssues.push_back({ CHK_ROAD, inst, inst->m_translation, msg });
+			}else if(gCheckEnabled[CHK_TRACK] && (centreTrack || track >= 2)){
+				snprintf(msg, sizeof(msg), "%s (%d) stands on a dirt track", name, inst->m_objectId);
+				gIssues.push_back({ CHK_TRACK, inst, inst->m_translation, msg });
+			}
+		}
+	}
+
+	ExportLists l;
+	CollectExport(&l);
+	int total = (int)l.objects.size();
+	if(gSampExportFormat == SAMP_FORMAT_NATIVE && total > 1000){
+		snprintf(msg, sizeof(msg), "%d objects, but SA-MP's CreateObject allows 1000 - use the streamer format", total);
+		gIssues.push_back({ CHK_LIMIT, nil, TheCamera.m_target, msg });
+	}
+	if(gSampExportFormat != SAMP_FORMAT_NATIVE && objs.size() > 500){
+		// densest spot: most objects within 300 m (2D)
+		int best = 0;
+		ObjectInst *bestInst = nil;
+		for(size_t i = 0; i < objs.size(); i += objs.size() > 4000 ? 4 : 1){
+			int n = 0;
+			for(size_t k = 0; k < objs.size(); k++){
+				float dx = objs[k]->m_translation.x - objs[i]->m_translation.x;
+				float dy = objs[k]->m_translation.y - objs[i]->m_translation.y;
+				if(dx*dx + dy*dy < 300.0f*300.0f) n++;
+			}
+			if(n > best){ best = n; bestInst = objs[i]; }
+		}
+		if(best > 500){
+			snprintf(msg, sizeof(msg), "%d objects within 300 m of here: the streamer shows 500 at once by default", best);
+			gIssues.push_back({ CHK_DENSITY, bestInst, bestInst->m_translation, msg });
+		}
+	}
+	if(!gRawObjects.empty()){
+		snprintf(msg, sizeof(msg), "%d object%s use models Ariane can't draw", (int)gRawObjects.size(),
+			gRawObjects.size() == 1 ? "" : "s");
+		rw::V3d p = { gRawObjects[0].x, gRawObjects[0].y, gRawObjects[0].z };
+		gIssues.push_back({ CHK_NOTDRAWN, nil, p, msg });
+	}
+	gChecksMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+static void
+ChecksWindow(void)
+{
+	if(!gShowChecksWindow)
+		return;
+	ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
+	if(!ImGui::Begin(ICON_FA_WRENCH " SA-MP Checks", &gShowChecksWindow)){
+		ImGui::End();
+		return;
+	}
+	if(!gChecksRan)
+		RunChecks();
+	if(ImGui::Button(ICON_FA_ROTATE " Run checks"))
+		RunChecks();
+	ImGui::SameLine();
+	ImGui::TextDisabled("%d map objects checked in %.0f ms", gChecksObjects, gChecksMs);
+
+	int counts[NUM_CHECKS] = {};
+	for(size_t i = 0; i < gIssues.size(); i++) counts[gIssues[i].kind]++;
+	static bool show[NUM_CHECKS] = { true, true, true, true, true, true, true, true };
+	for(int k = 0; k < NUM_CHECKS; k++){
+		if(k % 4) ImGui::SameLine();
+		char label[64];
+		snprintf(label, sizeof(label), "%s (%d)##chk%d", kCheckNames[k], counts[k], k);
+		if(counts[k] > 0)
+			ImGui::PushStyleColor(ImGuiCol_Text, k == CHK_NOTDRAWN ? ImVec4(0.7f, 0.7f, 0.7f, 1) : ImVec4(1.0f, 0.75f, 0.35f, 1));
+		ImGui::Checkbox(label, &show[k]);
+		if(counts[k] > 0)
+			ImGui::PopStyleColor();
+		ImGui::SetItemTooltip("%s", kCheckHelp[k]);
+	}
+	if(gIssues.empty()){
+		ImGui::Spacing();
+		ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1), "No problems found.");
+		ImGui::End();
+		return;
+	}
+	// toolbar: acts on the issues whose objects are selected
+	std::vector<int> pickedIssues;
+	for(size_t i = 0; i < gIssues.size(); i++)
+		if(show[gIssues[i].kind] && gIssues[i].inst && !gIssues[i].inst->m_isDeleted && gIssues[i].inst->m_selected)
+			pickedIssues.push_back((int)i);
+	ImGui::BeginDisabled(pickedIssues.empty());
+	if(ImGui::Button("Go to")){
+		CheckIssue &it = gIssues[pickedIssues[0]];
+		FlyTo(it.inst, it.pos);
+	}
+	ImGui::SetItemTooltip("Fly to the first selected problem (double-click a row does the same)");
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	if(!pickedIssues.empty()) ImGui::Text("%d selected - Delete deletes them, G snaps them to the ground", (int)pickedIssues.size());
+	else ImGui::TextDisabled("Click a problem to select its object");
+
+	float footer = ImGui::GetTextLineHeightWithSpacing() * 1.2f;
+	if(ImGui::BeginTable("##issues", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+	                     ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable, ImVec2(0, -footer))){
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableSetupColumn("Check", ImGuiTableColumnFlags_WidthFixed, 120);
+		ImGui::TableSetupColumn("Problem", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableHeadersRow();
+		static int anchor = -1;
+		int clicked = -1;
+		bool doubleClicked = false;
+		std::vector<int> visible;
+		for(size_t i = 0; i < gIssues.size(); i++){
+			CheckIssue &it = gIssues[i];
+			if(!show[it.kind])
+				continue;
+			visible.push_back((int)i);
+			bool gone = it.inst && it.inst->m_isDeleted;
+			bool sel = it.inst && !gone && it.inst->m_selected;
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			char label[64];
+			snprintf(label, sizeof(label), "%s##issue%d", kCheckNames[it.kind], (int)i);
+			if(ImGui::Selectable(label, sel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)){
+				clicked = (int)i;
+				doubleClicked = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+			}
+			ImGui::TableNextColumn();
+			if(gone) ImGui::TextDisabled("%s (deleted)", it.msg.c_str());
+			else ImGui::TextWrapped("%s", it.msg.c_str());
+		}
+		ImGui::EndTable();
+		if(clicked >= 0){
+			CheckIssue &it = gIssues[clicked];
+			bool gone = it.inst && it.inst->m_isDeleted;
+			ImGuiIO &io = ImGui::GetIO();
+			if(it.inst == nil || gone)
+				FlyTo(nil, it.pos);	// nothing to select: just show the spot
+			else if(io.KeyShift && anchor >= 0){
+				int a = -1, b = -1;
+				for(int v = 0; v < (int)visible.size(); v++){
+					if(visible[v] == anchor) a = v;
+					if(visible[v] == clicked) b = v;
+				}
+				if(a >= 0 && b >= 0){
+					if(!io.KeyCtrl) ClearSelection();
+					for(int v = a < b ? a : b; v <= (a < b ? b : a); v++){
+						CheckIssue &o = gIssues[visible[v]];
+						if(o.inst && !o.inst->m_isDeleted) o.inst->Select();
+					}
+				}
+			}else if(io.KeyCtrl){
+				if(it.inst->m_selected) it.inst->Deselect(); else it.inst->Select();
+				anchor = clicked;
+			}else{
+				ClearSelection();
+				it.inst->Select();
+				anchor = clicked;
+			}
+			if(doubleClicked)
+				FlyTo(gone ? nil : it.inst, it.pos);
+		}
+	}
+	ImGui::TextDisabled("Click selects, Ctrl+click adds, Shift+click a range, double-click flies there.");
+	ImGui::End();
+}
+
+// ------------------------------------------------------------------ show in game
+
+// Sync, then ask the server to move admins to the editor's view (scriptfiles/ariane_goto.txt,
+// read by tools/samp/ariane_live.pwn or a gamemode's own copy).
+void
+SampShowInGame(void)
+{
+	LoadSettings();
+	if(gSampServerDir[0] == '\0'){
+		gOpenServer = true;
+		return;
+	}
+	if(!DoSyncToServer(false))
+		return;
+	rw::V3d target = TheCamera.m_target, ground;
+	float z = target.z + 1.0f;
+	if(GetGroundPlacementSurface(target, &ground, nil, false))
+		z = ground.z + 1.0f;
+	float dx = target.x - TheCamera.m_position.x, dy = target.y - TheCamera.m_position.y;
+	float angle = atan2f(dy, dx) * 180.0f / 3.14159265f - 90.0f;	// SA-MP: 0 = north, counter-clockwise
+	while(angle < 0.0f) angle += 360.0f;
+	char path[1200];
+	JoinPath(path, sizeof(path), gSampServerDir, "scriptfiles/ariane_goto.txt");
+	FILE *f = fopen(path, "w");
+	if(f == nil){
+		Toast(TOAST_SAVE, "Could not write %s", path);
+		return;
+	}
+	static unsigned counter;
+	int who = gSampGotoWho;
+	if(who == GOTO_PLAYER && gSampGotoPlayer[0] == '\0')
+		who = GOTO_RCON;
+	fprintf(f, "goto %u%03u %.3f %.3f %.3f %.1f 0 0 %s%s%s\n", (unsigned)time(nil), counter++ % 1000,
+		target.x, target.y, z, angle, kGotoModes[who], who == GOTO_PLAYER ? " " : "", who == GOTO_PLAYER ? gSampGotoPlayer : "");
+	fclose(f);
+	static const char *whoText[] = { "RCON admins", "players your server script picks", "", "everyone" };
+	if(who == GOTO_PLAYER)
+		Toast(TOAST_SAVE, "Synced - moving %s to this view (needs the ariane_live script)", gSampGotoPlayer);
+	else
+		Toast(TOAST_SAVE, "Synced - moving %s to this view (needs the ariane_live script)", whoText[who]);
+}
+
+// ------------------------------------------------------------------ material editor (Object Info)
+
+static ImVec4
+ArgbToVec(uint32 c)
+{
+	return ImVec4(((c >> 16) & 0xFF) / 255.0f, ((c >> 8) & 0xFF) / 255.0f, (c & 0xFF) / 255.0f, ((c >> 24) & 0xFF) / 255.0f);
+}
+
+static uint32
+VecToArgb(const ImVec4 &v)
+{
+	auto b = [](float f){ return (uint32)(fminf(fmaxf(f, 0.0f), 1.0f) * 255.0f + 0.5f); };
+	return b(v.w) << 24 | b(v.x) << 16 | b(v.y) << 8 | b(v.z);
+}
+
+// a model that uses this txd: SetObjectMaterial loads the txd through it
+static int
+ModelForTxd(int slot)
+{
+	static std::map<int, int> cache;
+	std::map<int, int>::iterator it = cache.find(slot);
+	if(it != cache.end())
+		return it->second;
+	int found = -1;
+	for(int i = 0; i < NUMOBJECTDEFS && found < 0; i++){
+		ObjectDef *o = GetObjectDef(i);
+		if(o && o->m_txdSlot == slot)
+			found = i;
+	}
+	cache[slot] = found;
+	return found;
+}
+
+static rw::Geometry*
+FirstGeometry(ObjectDef *obj)
+{
+	if(obj == nil) return nil;
+	if(obj->m_type == ObjectDef::ATOMIC)
+		return obj->m_atomics[0] ? obj->m_atomics[0]->geometry : nil;
+	if(obj->m_clump){
+		FORLIST(lnk, obj->m_clump->atomics)
+			return rw::Atomic::fromClump(lnk)->geometry;
+	}
+	return nil;
+}
+
+static const SampMaterial*
+FindMaterial(ObjectInst *inst, int index)
+{
+	std::map<ObjectInst*, std::vector<SampMaterial>>::iterator it = gInstMaterials.find(inst);
+	if(it == gInstMaterials.end()) return nil;
+	for(size_t i = 0; i < it->second.size(); i++)
+		if(it->second[i].index == index) return &it->second[i];
+	return nil;
+}
+
+static rw::Texture*
+TextureByName(const char *txd, const char *tex)
+{
+	if(txd == nil || tex == nil) return nil;
+	int slot = FindTxdSlot(txd);
+	if(slot < 0) return nil;
+	if(!IsTxdLoaded(slot)) LoadTxd(slot);
+	return FindTxdTexture(slot, tex);
+}
+
+void
+SampMaterialsInspector(ObjectInst *inst)
+{
+	if(inst == nil)
+		return;
+	if(gSampProtectGameFiles && SampIsWorldBuilding(inst)){
+		ImGui::TextDisabled("Game buildings can't be retextured in SA-MP. Place a copy of the\n"
+		                    "model (it joins the SA-MP layer) and retexture that.");
+		return;
+	}
+	ObjectDef *obj = GetObjectDef(inst->m_objectId);
+	rw::Geometry *g = FirstGeometry(obj);
+	if(g == nil){
+		ImGui::TextDisabled("Model not loaded yet.");
+		return;
+	}
+	static ObjectInst *copySource;
+	static int pickSlot = -1;
+	static char pickTxd[64];
+	static ObjectInst *pickInst;
+	int slots = g->matList.numMaterials < 16 ? g->matList.numMaterials : 16;
+	ImGui::TextDisabled("Slot = SA-MP material index. Changes sync and export like any edit.");
+	for(int i = 0; i < slots; i++){
+		ImGui::PushID(i);
+		rw::Material *m = g->matList.materials[i];
+		const SampMaterial *sm = FindMaterial(inst, i);
+		rw::Texture *shown = sm && !sm->text ? TextureByName(sm->txd.c_str(), sm->tex.c_str()) : nil;
+		if(shown == nil && m) shown = m->texture;
+		if(shown && shown->raster)
+			ImGui::Image((void*)(intptr_t)shown, ImVec2(36, 36));
+		else
+			ImGui::Dummy(ImVec2(36, 36));
+		ImGui::SameLine();
+		ImGui::BeginGroup();
+		if(sm && sm->text)
+			ImGui::Text("%d  text \"%.40s\"", i, sm->str.c_str());
+		else if(sm && sm->txd != "none")
+			ImGui::Text("%d  %s / %s", i, sm->txd.c_str(), sm->tex.c_str());
+		else
+			ImGui::TextDisabled("%d  %s%s", i, m && m->texture ? m->texture->name : "(no texture)", sm ? "  (recoloured)" : "");
+		if(ImGui::SmallButton("Texture...")){
+			pickSlot = i;
+			pickInst = inst;
+			TxdDef *td = obj ? GetTxdDef(obj->m_txdSlot) : nil;
+			if(sm && !sm->text && sm->txd != "none")
+				snprintf(pickTxd, sizeof(pickTxd), "%s", sm->txd.c_str());
+			else
+				snprintf(pickTxd, sizeof(pickTxd), "%s", td ? td->name : "");
+			ImGui::OpenPopup("Pick texture");
+		}
+		ImGui::SameLine();
+		ImVec4 col = sm && !sm->text && sm->color ? ArgbToVec(sm->color) : ImVec4(1, 1, 1, 1);
+		if(ImGui::ColorEdit4("##colour", &col.x, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar)){
+			if(sm && !sm->text)
+				SampSetMaterial(inst, i, sm->model, sm->txd.c_str(), sm->tex.c_str(), VecToArgb(col));
+			else
+				SampSetMaterial(inst, i, -1, "none", "none", VecToArgb(col));
+		}
+		ImGui::SetItemTooltip("Material colour (ARGB). White with full alpha keeps the texture as it is.");
+		if(sm){
+			ImGui::SameLine();
+			if(ImGui::SmallButton("Clear"))
+				SampClearMaterials(inst, i);
+		}
+		ImGui::EndGroup();
+
+		if(pickSlot == i && pickInst == inst && ImGui::BeginPopup("Pick texture")){
+			ImGui::Text("Texture for slot %d", i);
+			ImGui::SetNextItemWidth(200);
+			ImGui::InputTextWithHint("TXD", "e.g. beach_sfs", pickTxd, sizeof(pickTxd));
+			int slot = pickTxd[0] ? FindTxdSlot(pickTxd) : -1;
+			if(slot < 0)
+				ImGui::TextDisabled("Type a TXD name (this model's own TXD is filled in).");
+			else{
+				if(!IsTxdLoaded(slot)) LoadTxd(slot);
+				TxdDef *td = GetTxdDef(slot);
+				int model = ModelForTxd(slot);
+				ImGui::BeginChild("##texgrid", ImVec2(440, 300));
+				// as many 56 px tiles per row as fit (no clipped last column)
+				ImGuiStyle &st = ImGui::GetStyle();
+				float tileW = 56.0f + st.FramePadding.x * 2.0f + st.ItemSpacing.x;
+				int cols = (int)((ImGui::GetContentRegionAvail().x + st.ItemSpacing.x) / tileW);
+				if(cols < 1) cols = 1;
+				int n = 0;
+				if(td && td->txd){
+					FORLIST(lnk, td->txd->textures){
+						rw::Texture *t = rw::Texture::fromDict(lnk);
+						if(t == nil || t->raster == nil) continue;
+						if(n % cols) ImGui::SameLine();
+						ImGui::PushID(n++);
+						if(ImGui::ImageButton("##t", (void*)(intptr_t)t, ImVec2(56, 56))){
+							uint32 keep = sm && !sm->text ? sm->color : 0;
+							SampSetMaterial(inst, i, model >= 0 ? model : inst->m_objectId, pickTxd, t->name, keep);
+							ImGui::CloseCurrentPopup();
+						}
+						ImGui::SetItemTooltip("%s", t->name);
+						ImGui::PopID();
+					}
+				}
+				if(n == 0)
+					ImGui::TextDisabled("No textures in this TXD.");
+				ImGui::EndChild();
+			}
+			ImGui::EndPopup();
+		}
+		ImGui::PopID();
+	}
+	ImGui::Spacing();
+	if(ImGui::SmallButton("Copy materials"))
+		copySource = gInstMaterials.count(inst) ? inst : nil;
+	ImGui::SetItemTooltip("Remember this object's materials to paste onto others");
+	ImGui::SameLine();
+	if(ImGui::SmallButton("Paste to selection") && copySource && !copySource->m_isDeleted){
+		int n = 0;
+		for(CPtrNode *p = selection.first; p; p = p->next){
+			ObjectInst *o = (ObjectInst*)p->item;
+			if(o != copySource && !SampIsWorldBuilding(o) && SampCopyMaterials(copySource, o)){
+				o->m_isDirty = true;
+				n++;
+			}
+		}
+		Toast(TOAST_SELECTION, "Pasted materials onto %d object(s)", n);
+	}
+	if(gInstMaterials.count(inst)){
+		ImGui::SameLine();
+		if(ImGui::SmallButton("Clear all"))
+			SampClearMaterials(inst, -1);
+	}
+}
+
+// ------------------------------------------------------------------ per-frame entry (gui.cpp)
+
+// Server -> editor: scriptfiles/ariane_focus.txt holds "focus <seq> <x> <y> <z>". Checked once a second;
+// a request already there when Ariane starts is not acted on.
+static void
+PollFocusRequests(void)
+{
+	static double next;
+	static bool primed;
+	static char lastSeq[32];
+	double t = ImGui::GetTime();
+	if(t < next)
+		return;
+	next = t + 1.0;
+	LoadSettings();
+	if(gSampServerDir[0] == '\0')
+		return;
+	char path[1200];
+	JoinPath(path, sizeof(path), gSampServerDir, "scriptfiles/ariane_focus.txt");
+	FILE *f = fopen(path, "r");
+	char seq[32] = "";
+	float x = 0.0f, y = 0.0f, z = 0.0f;
+	bool ok = false;
+	if(f){
+		char line[256];
+		if(fgets(line, sizeof(line), f))
+			ok = sscanf(line, "focus %31s %f %f %f", seq, &x, &y, &z) == 4;
+		fclose(f);
+	}
+	if(!primed){
+		primed = true;
+		snprintf(lastSeq, sizeof(lastSeq), "%s", ok ? seq : "");
+		return;
+	}
+	if(!ok || strcmp(seq, lastSeq) == 0)
+		return;
+	snprintf(lastSeq, sizeof(lastSeq), "%s", seq);
+	if(!gSampFollowFocus)
+		return;
+	rw::V3d p = { x, y, z };
+	TheCamera.setTarget(p);
+	TheCamera.setDistanceFromTarget(25.0f);
+	Toast(TOAST_SELECTION, "Server: looking at %.1f, %.1f, %.1f", x, y, z);
+}
+
+void
+SampWindows(void)
+{
+	RemovedBuildingsWindow();
+	ChecksWindow();
+	PollFocusRequests();
 }

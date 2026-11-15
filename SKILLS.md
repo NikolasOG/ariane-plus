@@ -138,6 +138,12 @@ colour. Example to copy: `prefab place watchtower_blocks X Y HEADING`.
   (`model_view`) shows its real shape, scale and collision from any angle - catch open-backed
   models, mismatched collision and the wrong size before placing dozens.
 
+* **Group what belongs together**: after building a house, a camp or a checkpoint, name it with
+  `editor-groups create "north gate" ID ID ...` (`editor_group_create`). The user sees it in
+  Window > Groups and can move, rotate (around its centre), duplicate or delete it in one go.
+* **Point the user at the editor's own checks**: SA-MP > Checks lists floating objects, objects on
+  roads and dirt tracks, explosive props and duplicates; SA-MP > Removed buildings lists every removal.
+
 * **Dry-run first**: `wall-run`, `pack` and `settle` take `--dry-run`. Read the
   counts before committing hundreds of objects.
 * **Batch**: bulk delete (`delete ID ID ...` / `map_delete_many`) and

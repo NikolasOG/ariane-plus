@@ -246,10 +246,9 @@ TelemetrySetEnabled(bool enabled)
 void
 TelemetrySendPing(void)
 {
-	if(!TelemetryIsEnabled())
-		return;
-	HANDLE h = (HANDLE)_beginthreadex(nil, 0, TelemetryThread, nil, 0, nil);
-	if(h) CloseHandle(h);
+	// Ariane Plus: never sends anything. TELEMETRY_HOST is the original Ariane's server, not ours,
+	// so a fork must not report to it (opted in or not).
+	(void)TelemetryThread;
 }
 
 #else

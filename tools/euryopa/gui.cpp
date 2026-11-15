@@ -1,9 +1,11 @@
 #include "euryopa.h"
+#include "groups.h"
 #include "autocol.h"
 #include "modloader.h"
 #include "imgui/imgui_internal.h"
 #include "object_categories.h"
 #include "updater.h"
+#include "version.h"
 #include "icons.h"
 #include <cmath>
 #include <string>
@@ -2302,6 +2304,14 @@ static bool gShowDestroyMap = false;
 static bool gShowReloadGame = false;
 static bool gDestroyMapIncludeWater = true;
 static void uiExportPrefabPopup(void);
+static char gPrefabNameSuggestion[128];
+// Opens File > Export Prefab for the current selection, with the name box filled in
+void
+OpenExportPrefabPopup(const char *suggestedName)
+{
+	snprintf(gPrefabNameSuggestion, sizeof(gPrefabNameSuggestion), "%s", suggestedName ? suggestedName : "");
+	gOpenExportPrefab = true;
+}
 static void uiImportPrefabPopup(void);
 static void uiCustomImportPopup(void);
 static void uiDestroyMapPopup(void);
@@ -3924,6 +3934,8 @@ uiMainmenu(void)
 				if(ImGui::MenuItem(ICON_FA_CODE_COMPARE " Changes", "F", showDiffWindow)) { showDiffWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_CUBE " Mapping Styles", "Ctrl+Shift+M", gShowStylesWindow)) { gShowStylesWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_LIST " Log ", nil, showLogWindow)) { showLogWindow ^= 1; }
+				if(ImGui::MenuItem(ICON_FA_LIST " Groups"))
+					GroupsOpenWindow();
 				if(ImGui::MenuItem(ICON_FA_CUBE " Model Viewer", "P", ModelViewerIsOpen())){
 					if(GetSpawnObjectId() >= 0) ModelViewerOpen(GetSpawnObjectId(), nil);
 					else Toast(TOAST_SPAWN, "Select a model in the Object Browser first");
@@ -4015,7 +4027,8 @@ uiExportPrefabPopup(void)
 	if(gOpenExportPrefab){
 		gShowExportPrefab = true;
 		gOpenExportPrefab = false;
-		prefabName[0] = '\0';
+		snprintf(prefabName, sizeof(prefabName), "%s", gPrefabNameSuggestion);
+		gPrefabNameSuggestion[0] = '\0';
 		ImGui::SetNextWindowFocus();
 	}
 
@@ -4746,6 +4759,14 @@ uiKeyboardShortcutsWindow(void)
 		{ "SA-MP", "Ctrl+Shift+P", "Export Pawn... (streamer, native open.mp / SA-MP or wrapper functions)", "Global" },
 		{ "SA-MP", "Ctrl+Shift+C", "Copy selected objects as Pawn code in the export format", "Global" },
 		{ "SA-MP", "Ctrl+Shift+O", "Import an SA-MP / Texture Studio / MTA map", "Global" },
+		{ "SA-MP", "Ctrl+Shift+W", "Allow removing world buildings outside the opened IPL (toggle)", "Global" },
+		{ "SA-MP", "Ctrl+Shift+T", "Show in game: sync, then move admins in game to this view", "Global" },
+
+		{ "Groups", "Ctrl+Shift+G", "Group the selection under a name", "Global" },
+		{ "Groups", "Ctrl+Shift+U", "Ungroup the groups the selection touches", "Global" },
+		{ "Groups", "Click a member", "Selects the whole group (toggle in Window > Groups)", "Viewport" },
+		{ "Groups", "Rotate (Q)", "A whole group rotates around its centre", "Viewport" },
+		{ "SA-MP", "Delete", "On world buildings: confirm, then remove them (RemoveBuildingForPlayer)", "Viewport" },
 		{ "SA-MP", "Drop file on window", "Import .pwn / .inc / .txt / .map", "Global" },
 		{ "SA-MP", "Delete stock building", "Exported as RemoveBuildingForPlayer (with its LOD)", "SA-MP mode" },
 	};
@@ -4822,10 +4843,22 @@ uiHelpWindow(void)
 		showShortcutsWindow = true;
 
 	ImGui::Spacing();
+	ImGui::SeparatorText("About");
+	ImGui::Text("Ariane Plus %s (based on Ariane %s)", ARIANE_PLUS_VERSION, ARIANE_BASE_VERSION);
+	ImGui::TextWrapped("Map editor by Dryxio, edited by NikolasOG.");
+	ImGui::TextWrapped("Based on aap's euryopa (librwgta) and librw.");
+	ImGui::TextWrapped("Free software under the GNU GPL v2 or later - see LICENSE and CREDITS.md.");
+	ImGui::TextLinkOpenURL("Ariane Plus on GitHub", "https://github.com/" ARIANE_PLUS_REPO);
+	ImGui::SameLine(0, 16);
+	ImGui::TextLinkOpenURL("Original Ariane by Dryxio", "https://github.com/Dryxio/ariane");
+
+	ImGui::Spacing();
 	ImGui::SeparatorText("Community & Support");
-	ImGui::TextWrapped("Need help, want to report a problem, or follow Ariane updates? Join the community on Discord.");
-	ImGui::TextLinkOpenURL("Join the Ariane Discord", "https://discord.gg/eE9s9H4e24");
-	ImGui::SetItemTooltip("Opens the Ariane Discord invite in your browser.");
+	ImGui::TextWrapped("Problems with Ariane Plus (SA-MP features, groups, checks, ...)? Report them on the fork's GitHub issues.");
+	ImGui::TextLinkOpenURL("Report an Ariane Plus issue", "https://github.com/" ARIANE_PLUS_REPO "/issues");
+	ImGui::TextWrapped("The original Ariane community (Dryxio's Discord) covers the editor Ariane Plus is based on.");
+	ImGui::TextLinkOpenURL("Original Ariane Discord (Dryxio)", "https://discord.gg/eE9s9H4e24");
+	ImGui::SetItemTooltip("Opens the original Ariane Discord invite in your browser. Ariane Plus is an unofficial fork.");
 
 	ImGui::End();
 }
@@ -5932,6 +5965,28 @@ uiInstInfo(ObjectInst *inst)
 
 	InputTextReadonly<MODELNAMELEN>("Model##Inst", obj->m_name);
 	InputTextReadonly<1024>("IPL", inst->m_file->name);
+	if(const char *groupName = GroupNameOf(inst)){
+		ImGui::Text("Group: %s", groupName);
+		ImGui::SameLine();
+		if(ImGui::SmallButton("Groups..."))
+			GroupsOpenWindow();
+	}
+
+	if(!inst->m_isDeleted && !IsInstInIplMapDocument(inst)){
+		// picked with SA-MP > Allow removing world buildings: it can go, but nothing else changes
+		ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "World building (removal only)");
+		ImGui::TextWrapped("It isn't part of the opened IPL. You can remove it for SA-MP "
+		                   "(RemoveBuildingForPlayer), not move or edit it.");
+		if(ImGui::Button("Remove building...")){
+			finishTransformPanelEdit();
+			ClearSelection();
+			inst->Select();
+			SampDeleteSelection();
+		}
+		ImGui::SetItemTooltip("Asks first. Hidden here and exported as RemoveBuildingForPlayer (with its LOD);\n"
+		                      "your game's IPL files are not changed. Ctrl+Z brings it back.");
+		return;
+	}
 
 	if(inst->m_isDeleted){
 		ImGui::PushStyleColor(ImGuiCol_Text, (ImVec4)ImColor(255, 80, 80));
@@ -5941,10 +5996,18 @@ uiInstInfo(ObjectInst *inst)
 		if(ImGui::Button("Undelete"))
 			inst->Undelete();
 	}else{
-		if(ImGui::Button("Delete")){
+		bool worldBuilding = SampModeActive() && SampIsWorldBuilding(inst);
+		if(ImGui::Button(worldBuilding ? "Remove building..." : "Delete")){
 			finishTransformPanelEdit();
-			inst->Delete();
+			if(worldBuilding){
+				ClearSelection();
+				inst->Select();
+				SampDeleteSelection();
+			}else
+				inst->Delete();
 		}
+		if(worldBuilding)
+			ImGui::SetItemTooltip("A game building: removing it exports as RemoveBuildingForPlayer (asks first).");
 		if(inst->m_lod){
 			ImGui::SameLine();
 			ImGui::TextDisabled("(LOD: %s)", GetObjectDef(inst->m_lod->m_objectId)->m_name);
@@ -7352,6 +7415,8 @@ uiInstWindow(void)
 		ObjectDef *obj = GetObjectDef(inst->m_objectId);
 		if(ImGui::CollapsingHeader("Instance"))
 			uiInstInfo(inst);
+		if(SampModeActive() && ImGui::CollapsingHeader("SA-MP materials"))
+			SampMaterialsInspector(inst);
 		if(ImGui::CollapsingHeader("Object"))
 			uiObjInfo(obj);
 		if(obj->m_numEffects)
@@ -8301,6 +8366,16 @@ gui(void)
 	// SA-MP: Ctrl+Shift+S/L/P/C/O (samp.cpp)
 	SampShortcuts(allowEditorShortcuts);
 
+	// Groups (groups.cpp): Ctrl+Shift+G names and groups the selection, Ctrl+Shift+U ungroups it
+	if(allowEditorShortcuts && CPad::IsCtrlDown() && CPad::IsShiftDown()){
+		if(CPad::IsKeyJustDown('G')){
+			finishTransformPanelEdit();
+			GroupsRequestCreate();
+		}
+		if(CPad::IsKeyJustDown('U'))
+			GroupsUngroupSelection();
+	}
+
 	// P: Model Viewer for the selected object, else the Object Browser's model
 	if(allowEditorShortcuts && !CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('P')){
 		if(selection.first){
@@ -8313,8 +8388,8 @@ gui(void)
 
 	// Gizmo mode shortcuts (not in water edit mode — water gizmo is always translate)
 	if(allowEditorShortcuts && !WaterLevel::gWaterEditMode){
-		if(CPad::IsKeyJustDown('W')) gGizmoMode = GIZMO_TRANSLATE;
-		if(CPad::IsKeyJustDown('Q')) gGizmoMode = GIZMO_ROTATE;
+		if(!CPad::IsCtrlDown() && CPad::IsKeyJustDown('W')) gGizmoMode = GIZMO_TRANSLATE;
+		if(!CPad::IsCtrlDown() && CPad::IsKeyJustDown('Q')) gGizmoMode = GIZMO_ROTATE;
 		if(allowEditorShortcuts && selection.first && !CPad::IsCtrlDown() && CPad::IsKeyJustDown('L'))
 			gGizmoSpace = gGizmoSpace == GIZMO_LOCAL ? GIZMO_WORLD : GIZMO_LOCAL;
 	}
@@ -8329,12 +8404,8 @@ gui(void)
 			}
 		}else{
 			finishTransformPanelEdit();
-			int count = 0;
-			for(CPtrNode *p = selection.first; p; p = p->next) count++;
-			if(count > 0){
-				DeleteSelected();
-				Toast(TOAST_DELETE, "Deleted %d instance(s)", min(count, MAX_BATCH_OBJECTS));
-			}
+			// world buildings in the selection become SA-MP removals: asks first (samp.cpp)
+			SampDeleteSelection();
 		}
 	}
 
@@ -8383,7 +8454,7 @@ gui(void)
 	}
 
 	// Ctrl+G to test in game
-	if(allowEditorShortcuts && CPad::IsCtrlDown() && CPad::IsKeyJustDown('G')){
+	if(allowEditorShortcuts && CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('G')){
 		finishTransformPanelEdit();
 		testInGame();
 	}
@@ -8399,7 +8470,7 @@ gui(void)
 		SnapSelectedToGround(CPad::IsShiftDown());
 	}
 
-	if(CPad::IsKeyJustDown('T')) showTimeWeatherWindow ^= 1;
+	if(!CPad::IsCtrlDown() && CPad::IsKeyJustDown('T')) showTimeWeatherWindow ^= 1;
 	if(showTimeWeatherWindow){
 		ImGui::Begin(ICON_FA_CLOUD_SUN " Time & Weather", &showTimeWeatherWindow);
 		uiTimeWeather();
@@ -8434,6 +8505,9 @@ gui(void)
 	if(!CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('I')) showInstanceWindow ^= 1;
 	if(showInstanceWindow) uiInstWindow();
 	ModelViewerWindow();
+	SampWindows();
+	GroupsUpdate();
+	GroupsWindow();
 
 	if(!CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('E')) showEditorWindow ^= 1;
 	if(showEditorWindow) uiEditorWindow();

@@ -134,15 +134,30 @@ EnsureClone(void)
 	return V.atomic || V.clump;
 }
 
+// The narrower half-angle of the view, mirroring rw::Camera::setFOV (its fov is horizontal at 4:3 and is
+// re-derived for the real aspect), so the whole model fits whichever way the viewport is wider.
+static float
+FitHalfAngle(float aspect)
+{
+	if(aspect <= 0.0f)
+		aspect = V.rtW > 0 && V.rtH > 0 ? (float)V.rtW / V.rtH :
+		         V.wantW > 0 && V.wantH > 0 ? (float)V.wantW / V.wantH : 4.0f / 3.0f;
+	float h = V.fov * 3.14159f / 360.0f;
+	float vfov = atanf(tanf(h / 2) / (4.0f / 3.0f)) * 2;
+	float hfov = atanf(tanf(vfov / 2) * aspect) * 2;
+	float tx = tanf(hfov), ty = tx / aspect;
+	return atanf(fminf(tx, ty));
+}
+
 static void
-FrameModel(void)
+FrameModel(float aspect = 0.0f)
 {
 	rw::V3d mn = V.rmin, mx = V.rmax;
 	if(!V.haveRender){ mn = { -1, -1, 0 }; mx = { 1, 1, 2 }; }
 	V.target = scale(add(mn, mx), 0.5f);
 	float radius = length(sub(mx, mn)) * 0.5f;
 	if(radius < 0.3f) radius = 0.3f;
-	V.dist = radius / sinf(V.fov * 0.5f * 3.14159265f / 180.0f) * 1.05f;
+	V.dist = radius / sinf(FitHalfAngle(aspect)) * 1.04f;
 	V.framed = true;
 }
 
@@ -341,7 +356,7 @@ RenderView(rw::Raster *color, rw::Raster *depth, int w, int h, bool pngOrientati
 	if(!EnsureClone())
 		return false;
 	if(!V.framed)
-		FrameModel();
+		FrameModel((float)w / (float)h);
 	rw::Camera *cam = ViewerCamera();
 	if(cam == nil)
 		return false;
@@ -479,7 +494,7 @@ ModelViewerCapture(int modelId, const char *path, int w, int h, float yawDeg, fl
 	rw::Raster *color = rw::Raster::create(w, h, 24, rw::Raster::C888 | rw::Raster::CAMERATEXTURE);
 	rw::Raster *depth = rw::Raster::create(w, h, 0, rw::Raster::ZBUFFER);
 	if(color && depth && EnsureClone()){
-		FrameModel();
+		FrameModel((float)w / (float)h);
 		V.dist *= zoom > 0.05f ? zoom : 1.0f;
 		ok = RenderView(color, depth, w, h, true);
 		if(ok){
@@ -782,7 +797,7 @@ ModelViewerWindow(void)
 	ImGui::SameLine();
 	if(ImGui::Button("Side")){ V.yaw = 0.0f; V.pitch = 0.0f; }
 	ImGui::SameLine();
-	if(ImGui::Button("Top")){ V.pitch = 1.55f; }
+	if(ImGui::Button("Top")){ V.yaw = -1.5707963f; V.pitch = 1.55f; }
 	ImGui::SameLine();
 	if(ImGui::Button("Iso")){ V.yaw = -0.785f; V.pitch = 0.5f; }
 	ImGui::SameLine(0, 20);
@@ -849,7 +864,7 @@ ModelViewerWindow(void)
 		if(ImGui::IsKeyPressed(ImGuiKey_F)) FrameModel();
 		if(ImGui::IsKeyPressed(ImGuiKey_1) || ImGui::IsKeyPressed(ImGuiKey_Keypad1)){ V.yaw = -1.5707963f; V.pitch = 0.0f; }
 		if(ImGui::IsKeyPressed(ImGuiKey_3) || ImGui::IsKeyPressed(ImGuiKey_Keypad3)){ V.yaw = 0.0f; V.pitch = 0.0f; }
-		if(ImGui::IsKeyPressed(ImGuiKey_7) || ImGui::IsKeyPressed(ImGuiKey_Keypad7)) V.pitch = 1.55f;
+		if(ImGui::IsKeyPressed(ImGuiKey_7) || ImGui::IsKeyPressed(ImGuiKey_Keypad7)){ V.yaw = -1.5707963f; V.pitch = 1.55f; }
 		if(ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) ModelViewerOpen(StepModel(V.modelId, -1), nil);
 		if(ImGui::IsKeyPressed(ImGuiKey_RightArrow)) ModelViewerOpen(StepModel(V.modelId, 1), nil);
 	}

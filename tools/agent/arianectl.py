@@ -282,6 +282,13 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	ssync = sub.add_parser("samp-sync", help="SA-MP > Sync to server (writes scriptfiles/ariane_live.txt)")
 	ssync.add_argument("--map", help="map name (also the name of the include written on sync, if enabled)")
 	ssync.add_argument("--force", action="store_true", help="allow syncing an empty layer")
+	egroups = sub.add_parser("editor-groups", help="The editor's named object groups (Groups panel, Ctrl+Shift+G)")
+	egroup_sub = egroups.add_subparsers(dest="egroup_command", required=True)
+	egroup_sub.add_parser("list", help="groups with their member instance ids")
+	egcreate = egroup_sub.add_parser("create", help="group existing objects under a name")
+	egcreate.add_argument("name"); egcreate.add_argument("ids", nargs="+", type=int)
+	egungroup = egroup_sub.add_parser("ungroup", help="forget a group (its objects stay)")
+	egungroup.add_argument("name")
 	vopen = sub.add_parser("viewer-open", help="Open the Model Viewer window on a model (show it to the user)")
 	vopen.add_argument("model")
 	mview = sub.add_parser("model-view", help="Model Viewer render of one model to PNG (any angle, clay, collision...)")
@@ -739,6 +746,14 @@ def main(argv: list[str] | None = None) -> int:
 			else:
 				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
 				                               args.heading, snap=not args.no_snap, base_z=args.base_z)
+		elif args.command == "editor-groups":
+			client = ArianeClient(args.socket, args.timeout)
+			if args.egroup_command == "list":
+				payload = client.command("editor_groups")
+			elif args.egroup_command == "create":
+				payload = client.command("editor_group_create", args.name, *args.ids)
+			else:
+				payload = client.command("editor_ungroup", args.name)
 		elif args.command == "viewer-open":
 			payload = ArianeClient(args.socket, args.timeout).command("viewer_open", args.model)
 		elif args.command == "model-view":

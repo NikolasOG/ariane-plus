@@ -131,6 +131,20 @@ ImGui_ImplRW_Init(void)
 		return false;
 	}
 	ImGui_ImplDX9_SetTextureResolver(ResolveEditorTexture);
+	// Ariane Plus icon (ariane.rc, resource 1) for the window and taskbar
+	HINSTANCE module = GetModuleHandleA(nil);
+	HICON bigIcon = (HICON)LoadImageA(module, MAKEINTRESOURCEA(1), IMAGE_ICON,
+		GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
+	HICON smallIcon = (HICON)LoadImageA(module, MAKEINTRESOURCEA(1), IMAGE_ICON,
+		GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+	if(bigIcon){
+		SendMessageA(mainWindow, WM_SETICON, ICON_BIG, (LPARAM)bigIcon);
+		SetClassLongPtrA(mainWindow, GCLP_HICON, (LONG_PTR)bigIcon);
+	}
+	if(smallIcon){
+		SendMessageA(mainWindow, WM_SETICON, ICON_SMALL, (LPARAM)smallIcon);
+		SetClassLongPtrA(mainWindow, GCLP_HICONSM, (LONG_PTR)smallIcon);
+	}
 	SetLastError(0);
 	previousWindowProc = (WNDPROC)SetWindowLongPtr(mainWindow, GWLP_WNDPROC, (LONG_PTR)EditorWindowProc);
 	if(!previousWindowProc){

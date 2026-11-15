@@ -9,6 +9,8 @@ uint16 CPad::tempKeystates[KEY_NUMKEYS];
 CMouseControllerState CPad::oldMouseState;
 CMouseControllerState CPad::newMouseState;
 CMouseControllerState CPad::tempMouseState;
+uint16 CPad::latchedKeystates[KEY_NUMKEYS];
+uint32 CPad::latchedMouseBtns;
 
 int CPad::clickState;
 int CPad::clickx, CPad::clicky;
@@ -23,11 +25,16 @@ CPad::UpdatePads(void)
 
 	// keyboard
 	memcpy(CPad::oldKeystates, CPad::newKeystates, sizeof(CPad::oldKeystates));
-	memcpy(CPad::newKeystates, CPad::tempKeystates, sizeof(CPad::newKeystates));
+	// a key that went down and up again since the last frame still counts as pressed for one frame
+	for(int i = 0; i < KEY_NUMKEYS; i++)
+		CPad::newKeystates[i] = CPad::tempKeystates[i] | CPad::latchedKeystates[i];
+	memset(CPad::latchedKeystates, 0, sizeof(CPad::latchedKeystates));
 
 	// mouse
 	oldMouseState = newMouseState;
 	newMouseState = tempMouseState;
+	newMouseState.btns |= latchedMouseBtns;	// same for a quick click
+	latchedMouseBtns = 0;
 	if(clickState == 2) clickState = 0;
 	if(clickState == 0 && newMouseState.btns & (newMouseState.btns ^ oldMouseState.btns)){
 		clickState = 1;

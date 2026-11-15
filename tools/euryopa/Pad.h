@@ -90,6 +90,10 @@ public:
 	static CMouseControllerState oldMouseState;
 	static CMouseControllerState newMouseState;
 	static CMouseControllerState tempMouseState;
+	// Presses that began since the last UpdatePads. A key or button pressed and released between
+	// two frames (a quick tap, a touchpad click) would otherwise never be seen as down.
+	static uint16 latchedKeystates[KEY_NUMKEYS];
+	static uint32 latchedMouseBtns;
 	static int clickState;
 	static int clickx, clicky;
 	static int clickbtn;

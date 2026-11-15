@@ -1,16 +1,163 @@
-# Ariane
+<p align="center"><img src="docs/plus/icon.png" width="128" alt="Ariane Plus icon"></p>
 
-Ariane is a map viewer and editor for Grand Theft Auto III, Vice City and San Andreas, built on [librw](https://github.com/Southland-FR/librw) and based on aap's euryopa.
+<h1 align="center">Ariane Plus</h1>
 
-Use it as a regular map editor, or let your AI explore and edit alongside you.
+<p align="center"><b>Map Editor by Dryxio, edited by NikolasOG</b><br>
+A free, open-source fork of <a href="https://github.com/Dryxio/ariane">Ariane</a> for GTA III, Vice City and San Andreas,<br>
+extended for SA-MP and open.mp mapping.</p>
 
-**[Download Ariane](https://github.com/Dryxio/ariane/releases/latest)** · [Discord](https://discord.gg/eE9s9H4e24) · [Use it with your AI](#use-ariane-with-your-ai)
+<p align="center">
+<a href="https://github.com/NikolasOG/ariane-plus/releases/latest"><b>Download</b></a> ·
+<a href="#whats-new-in-ariane-plus">What's new</a> ·
+<a href="#proof-of-concept-carson-haven">Proof of concept</a> ·
+<a href="#server-side-arianeinc">Server SDK</a> ·
+<a href="#mapping-with-an-ai-agent">AI mapping</a> ·
+<a href="CREDITS.md">Credits</a>
+</p>
+
+> **Ariane Plus is an unofficial fork.** It is not affiliated with or endorsed by Dryxio. Ariane is
+> Dryxio's work, built on aap's euryopa and librw — all credit for it stays with its creators (see
+> [CREDITS.md](CREDITS.md)). For the original editor, go to [Dryxio/ariane](https://github.com/Dryxio/ariane).
+
+![Ariane Plus: the SA-MP Checks panel over a mapped compound](docs/plus/editor_checks.jpg)
+
+## What's new in Ariane Plus
+
+Everything Ariane does, plus a full workflow for SA-MP / open.mp servers: map in the editor, see it live
+on your server, and keep the game files untouched.
+
+### SA-MP / open.mp mapping
+
+- **SA-MP mode** keeps your game files safe: new objects go to a separate SA-MP layer, and deleting or moving
+  a game building becomes `RemoveBuildingForPlayer` instead of an IPL edit.
+- **Import** SA-MP, Texture Studio and MTA maps (or drag a file onto the window). **Export** Pawn for the
+  streamer plugin, native open.mp / SA-MP `CreateObject`, or your own wrapper functions.
+- **Live sync**: *Sync to server* (Ctrl+Shift+S) writes `scriptfiles/ariane_live.txt` and the server
+  rebuilds the map within seconds; *Reload from server* brings the server's map back into the editor.
+- SA-MP's own models, **custom models** (`AddSimpleModel` from `models/artconfig.txt`) and **material
+  overrides** are all rendered in the editor.
+- **Show in game** (Ctrl+Shift+T): sync, then move players to the editor's view — RCON admins, players your
+  own script picks, one named player, or everyone. Your server can also point the editor's camera at a
+  player or a spot.
+
+![The SA-MP menu with Show in game options](docs/plus/menu_samp.jpg)
+
+### SA-MP Checks
+
+*SA-MP > Checks* finds the mistakes that are easy to miss: floating objects, objects on roads or dirt
+tracks, explosive props, duplicates, too many objects for `CreateObject`, and spots where the streamer
+can't show everything at once. Click a problem to select its object, double-click to fly there
+(screenshot at the top).
+
+### Removing world buildings
+
+Remove game buildings by hand, even while another map is open: turn on *SA-MP > Allow removing world
+buildings* (Ctrl+Shift+W), select a building and press Delete. Ariane Plus asks first, removes its
+far-away LOD with it, and exports it as `RemoveBuildingForPlayer` — no IPL file changes, and Ctrl+Z
+brings it back. *SA-MP > Removed buildings* lists every removal, nearest first, to fly to or restore.
+
+![Confirming a world-building removal](docs/plus/editor_remove_world.jpg)
+
+<p align="center"><img src="docs/plus/panel_removed.jpg" width="520" alt="The Removed Buildings panel"></p>
+
+### Groups
+
+Select objects and press **Ctrl+Shift+G** to group them under a name. Clicking any member selects the
+whole group, the gizmo moves it as one, and rotation turns it around its centre. *Window > Groups* lists
+them: go to, rename, duplicate, save as a prefab, ungroup or delete. Placing a prefab groups it
+automatically, and groups survive restarts.
+
+![A group of containers selected and rotating around its centre](docs/plus/editor_groups.jpg)
+
+### Materials in Object Info
+
+Retexture or recolour any placed object slot by slot: pick a texture from thumbnails of any TXD, set
+the material colour, copy a look to other objects. Same data as SA-MP's `SetObjectMaterial`; it syncs
+and exports like any edit.
+
+<p align="center"><img src="docs/plus/panel_materials.jpg" width="472" alt="The material editor in Object Info"></p>
+
+### Model Viewer
+
+An orbitable close-up of any model (Object Browser > *Preview*, or **P**): textured, clay or wireframe;
+collision, bounds, axes and a 1.8 m person for scale; materials, every texture of its TXD and collision
+stats; place it or fly to the nearest one.
+
+<p align="center"><img src="docs/plus/model_viewer.jpg" width="720" alt="The Model Viewer"></p>
+
+### And more
+
+- **Mapping styles**: curated model sets (for example *wasteland*) for consistent maps.
+- **Building blocks**: exact-size plain shapes to compose and retexture custom objects.
+- Fixes: dropped quick clicks and key taps, lost or squashed panels, mirrored thumbnails, and more.
+
+The full list of changes is in [SAMP-EDITION.md](SAMP-EDITION.md).
+
+## Proof of concept: Carson Haven
+
+A wasteland settlement mapped in and around Fort Carson with Ariane Plus — about 850 objects, 36 removed
+game buildings and retextured lots, mapped largely through the AI agent toolkit, then checked and refined
+in the editor with the tools above. All screenshots are taken inside Ariane Plus.
+
+| | |
+|---|---|
+| ![The container compound](docs/plus/carson_compound.jpg) | ![Inside the compound](docs/plus/carson_courtyard.jpg) |
+| ![The shanty town](docs/plus/carson_shanty.jpg) | ![The town blocks](docs/plus/carson_blocks.jpg) |
+
+## Server side: ariane.inc
+
+[`tools/samp/ariane.inc`](tools/samp/ariane.inc) is the server side of Ariane Plus in one include for
+open.mp and SA-MP (streamer plugin required), MIT-licensed so any gamemode can use it:
+
+```pawn
+#include <open.mp>
+#include <streamer>
+#include <ariane>          // starts by itself: live map, Show in game, removed buildings
+
+// give live map objects behaviour
+public OnArianeObjectCreate(STREAMER_TAG_OBJECT:objectid, modelid, index)
+{
+    return 1;
+}
+
+// your own permission check for "Players the server script picks"
+public Ariane_CanFollow(playerid)
+{
+    return IsPlayerAdmin(playerid);
+}
+```
+
+It also has a fly-around **freecam** (`Ariane_FreecamStart` / `Ariane_FreecamStop`), `Ariane_FocusEditor`
+to move the editor's camera from the server, queries for the live map and removed buildings, and
+`Ariane_CreateObject` & co. so maps exported with the wrapper prefix `Ariane_` compile as they are. The full
+reference is at the top of the file. Prefer no code? Load the ready-made filterscript
+[`ariane_live.pwn`](tools/samp/ariane_live.pwn) (`/arianefreecam`, `/arianefocus`, `/arianeview` for RCON admins).
+
+## Mapping with an AI agent
+
+Ariane Plus includes an agent toolkit: a local CLI (`arianectl`) and an MCP server that let an AI agent
+inspect assets, move the camera, capture images, place and retexture objects, lay walls, build from
+blocks, lint a site and sync it to your server. Start with [SKILLS.md](SKILLS.md); the full reference is
+[tools/agent/MAPPING_TOOLKIT.md](tools/agent/MAPPING_TOOLKIT.md). Install with
+`python -m pip install '.[mcp]'` from a clone, and see [tools/agent/README.md](tools/agent/README.md) for
+connecting the editor.
+
+## Download and usage
+
+Download a build from [Releases](https://github.com/NikolasOG/ariane-plus/releases/latest), place it in
+your GTA San Andreas (or III / Vice City) folder and run it. Ariane Plus checks this repository for updates.
+For SA-MP mapping, see [SAMP-EDITION.md](SAMP-EDITION.md): point *SA-MP > Server folder…* at your server
+and load the filterscript or `ariane.inc` there.
+
+The `ariane.asi` plugin (Test in Game, Hot Reload) and the optional integration ZIP come from the original
+Ariane — see the [Ariane Discord](https://discord.gg/eE9s9H4e24). Please report Ariane Plus problems as
+[issues on this repository](https://github.com/NikolasOG/ariane-plus/issues), not to the original project.
+
+## Features inherited from Ariane
 
 [![Watch the complete Ariane walkthrough](docs/ariane-complete-walkthrough.png)](https://www.youtube.com/watch?v=jJipK1woGAk)
 
-**[Watch the complete Ariane walkthrough on YouTube →](https://www.youtube.com/watch?v=jJipK1woGAk)**
-
-## Features
+**[Watch Dryxio's complete Ariane walkthrough on YouTube →](https://www.youtube.com/watch?v=jJipK1woGAk)**
 
 ### Map editing
 
@@ -40,78 +187,9 @@ Use it as a regular map editor, or let your AI explore and edit alongside you.
 - Control time, weather, rendering distance and post-processing while you work
 - Inspect collisions, zones, object information and other map data
 
-## Download and usage
-
-Download a current build from [GitHub Releases](https://github.com/Dryxio/ariane/releases/latest), place it in a supported GTA game directory and run it. Ariane automatically detects GTA III, Vice City or San Andreas.
-
-For AI-agent control, download the separate [Agent Alpha bundle](https://github.com/Dryxio/ariane/releases/tag/v1.40.9-agent-alpha.1) and follow its [CLI/MCP installation guide](https://github.com/Dryxio/ariane/blob/v1.40.9-agent-alpha.1/tools/release/AGENT_README.md). The stable editor download above does not include the agent interface.
-
-The universal `ariane.asi` enables Test in Game for GTA III, Vice City and San Andreas, plus Hot Reload for San Andreas. Hot Reload has limitations for streamed binary maps; see the in-app guidance for the current behavior.
-
-The optional integration ZIP on Discord also includes `III.VC.SA.SaveLoader`, which skips intros and loading screens for faster startup across all three games. Both plugins require a working ASI loader.
-
-Get the optional integration ZIP, development updates and support in the [Ariane Discord](https://discord.gg/eE9s9H4e24).
-
-### Release channels
-
-- **master** — the standard and recommended build
-- **PE/FLA** — an alternate build for projects that use expanded game limits
-- **Agent Alpha** — [agent-enabled editor, CLI and MCP prerelease](https://github.com/Dryxio/ariane/releases/tag/v1.40.9-agent-alpha.1); see [Use Ariane with your AI](#use-ariane-with-your-ai) below
-
-## Use Ariane with your AI
-
-The optional **Agent Alpha** lets your AI explore and edit maps with you through **`arianectl`** or **MCP**: inspect assets, move the camera, capture images, and propose reversible map edits. The agent controls the Ariane editor. Bring your own GTA files; no private server or gtastuff checkout is required.
-
-**Want to use it with your AI? Give your agent this repo and a task.** Use an AI coding agent that can access files and run commands on your computer. It can check your setup and guide you through anything that needs your help.
-
-Copy this into your agent:
-
-> Help me set up the Agent Alpha version of https://github.com/Dryxio/ariane. Read the Agent Alpha installation and CLI/MCP guides linked in the README. Choose the right download for my computer, check what's already installed, and help me install what's missing. Ask where my GTA San Andreas files are. Then launch Ariane, connect through arianectl, take me to Grove Street, and capture an image of the neighborhood from above.
-
-You'll need your own GTA game files. For AI control, use **Agent Alpha**; the stable editor does not include the agent interface.
-
-Available for **Windows x64** and **macOS Apple Silicon**, with real San Andreas CLI/MCP validation. Windows was tested under Windows 11 ARM64/Parallels with x64 emulation. **Linux x64 is experimental**: CI build/tests passed; real-game rendering is untested. [Validation details](https://github.com/Dryxio/ariane/releases/download/v1.40.9-agent-alpha.1/VALIDATION.json).
-
-<details>
-<summary>Manual Agent Alpha installation and CLI/MCP setup</summary>
-
-**[Download Agent Alpha 1](https://github.com/Dryxio/ariane/releases/tag/v1.40.9-agent-alpha.1)** → **[Install the ZIP and connect your agent](https://github.com/Dryxio/ariane/blob/v1.40.9-agent-alpha.1/tools/release/AGENT_README.md)** → [CLI/MCP workflow guide](https://github.com/Dryxio/ariane/blob/v1.40.9-agent-alpha.1/tools/agent/README.md)
-
-### Quick example: start the editor, then inspect its camera (macOS/Linux)
-
-After following the installation guide above, launch the **agent-enabled** editor in one terminal:
-
-```sh
-cd "/path/to/GTA San Andreas"
-"/path/to/agent-bundle/ariane" --agent-socket /tmp/ariane-agent-v1.sock
-```
-
-Wait for the map to load. In another terminal, use the CLI installed from the bundle:
-
-```sh
-"/path/to/agent-bundle/.venv-agent/bin/arianectl" ping
-"/path/to/agent-bundle/.venv-agent/bin/arianectl" camera-context
-"/path/to/agent-bundle/.venv-agent/bin/arianectl" capture "$PWD/ariane-view.png"
-```
-
-For Windows startup and MCP connection settings, use the [installation guide](https://github.com/Dryxio/ariane/blob/v1.40.9-agent-alpha.1/tools/release/AGENT_README.md). Agent source and documentation are available in the [Agent Alpha release tag](https://github.com/Dryxio/ariane/tree/v1.40.9-agent-alpha.1/tools/agent).
-
-</details>
-
-## Agent CLI and MCP (alpha)
-
-The repository includes an installable Python CLI and MCP stdio server for local
-agent control: scratch sessions, asset discovery, placement, validation and
-viewport captures. Install with `python -m pip install '.[mcp]'` from this clone.
-The editor must be built with the matching agent bridge; older releases may not
-include it. Your own GTA installation is required, and a basic offline catalogue
-can be generated directly from its IDE files without a separate gtastuff checkout.
-See [agent setup and smoke test](tools/agent/README.md) for installation, engine
-connection, Windows configuration and the explicit commit/save workflow.
-
 ## Building from source
 
-Ariane requires [Premake 5](https://premake.github.io/) and the
+Ariane Plus builds like Ariane. It requires [Premake 5](https://premake.github.io/) and the
 [`ariane` integration branch of librw](https://github.com/Southland-FR/librw/tree/ariane).
 For reproducible release builds, use the exact librw commit pinned as
 `LIBRW_REF` in `.github/workflows/build-euryopa.yml`. Set `LIBRW` to that librw
@@ -125,7 +203,7 @@ Install the compiler and OpenGL/GLFW development packages. On Ubuntu or Debian:
 sudo apt-get install build-essential libgl1-mesa-dev libglfw3-dev
 ```
 
-Build librw, then Ariane:
+Build librw, then Ariane Plus:
 
 ```bash
 export LIBRW=/path/to/librw-ariane
@@ -173,12 +251,25 @@ premake5 vs2019 --channel=master
 msbuild build\librwgta.sln /p:Configuration=Release /p:Platform=win-amd64-d3d9 /t:librwgta;euryopa /m
 ```
 
-Use `--channel=PE` instead when building the PE/FLA channel.
+Use `--channel=PE` instead when building the PE/FLA channel. The SA-MP features are developed and tested
+on the Windows Direct3D 9 build.
 
 ## License
 
-Because the project depends on LZO (GPL), consider the code in this repository dual-licensed as GPL.
+Ariane Plus is free software under the **GNU General Public License, version 2 or later** — because the
+project depends on LZO (GPL), as the upstream README states. See [LICENSE](LICENSE). The SA-MP server
+scripts in [`tools/samp`](tools/samp) are MIT-licensed so gamemodes can include them freely, and bundled
+third-party components keep their own licenses (texts in [licenses/](licenses)).
+
+GTA III, Vice City and San Andreas are trademarks of Rockstar Games / Take-Two Interactive. Ariane Plus is
+not affiliated with them and ships no game files — you need your own copy of the game.
 
 ## Credits
 
-- [aap](https://github.com/aap) — original euryopa/librwgta project and librw
+- **[Dryxio](https://github.com/Dryxio)** — [Ariane](https://github.com/Dryxio/ariane), the editor this fork is built on
+- **[aap](https://github.com/aap)** — the original euryopa/librwgta project and librw
+- **[Southland-FR](https://github.com/Southland-FR)** — the `ariane` branch of librw
+- Ariane contributors: Martin Turski, Anonymous Maarten, spicybung, dkluin
+- **[NikolasOG](https://github.com/NikolasOG)** — Ariane Plus
+
+Full credits and third-party licenses: [CREDITS.md](CREDITS.md).

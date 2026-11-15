@@ -17,7 +17,8 @@
 // all preceding stores (string buffers etc.) are visible to any core reading that flag.
 // Not portable to ARM or non-MSVC compilers; fine for this D3D9-only Windows app.
 //
-// Update policy: only ARIANE_VERSION bumps trigger user-visible updates.
+// Update policy: only ARIANE_PLUS_VERSION bumps trigger user-visible updates. Ariane Plus checks
+// its own repository (ARIANE_PLUS_REPO), never the original Ariane's releases.
 // SHA-suffixed release tags (v1.0.0-PE-abc1234) are CI bookkeeping only.
 
 static volatile long gUpdateCheckDone = 0;
@@ -290,7 +291,7 @@ CheckThread(void *arg)
 	// Query GitHub API for the latest release matching our channel
 	// Releases are tagged as: v1.0.0-master or v1.0.0-PE
 	wchar_t path[512];
-	swprintf(path, 512, L"/repos/Dryxio/ariane/releases?per_page=20");
+	swprintf(path, 512, L"/repos/%ls/releases?per_page=20", ARIANE_PLUS_REPO_W);
 
 	int size = 0;
 	char *json = HttpGet(L"api.github.com", path, &size);
@@ -324,7 +325,7 @@ CheckThread(void *arg)
 			for(int j = 0; ver[j] && ver[j] != '-' && j < 63; j++)
 				verClean[j] = ver[j];
 
-			if(IsNewerVersion(verClean, ARIANE_VERSION)){
+			if(IsNewerVersion(verClean, ARIANE_PLUS_VERSION)){
 				// Only grab version + download URL from the latest release
 				if(!found){
 					strncpy(gNewVersion, verClean, sizeof(gNewVersion) - 1);
@@ -448,7 +449,7 @@ UpdaterDrawGui(void)
 
 	if(ImGui::Begin(title, nil, flags)){
 		ImGui::Text("New version: %s", gNewVersion);
-		ImGui::Text("Current: %s", ARIANE_VERSION);
+		ImGui::Text("Current: Ariane Plus %s", ARIANE_PLUS_VERSION);
 		ImGui::Text("Channel: %s", ARIANE_CHANNEL_DISPLAY);
 
 		if(gChangelog[0]){

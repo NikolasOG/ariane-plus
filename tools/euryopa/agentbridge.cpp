@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #endif
 #include "euryopa.h"
+#include "groups.h"
 #include "agentbridge.h"
 
 #include <algorithm>
@@ -1027,7 +1028,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"samp_export\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"model_view\",\"viewer_open\",\"custom_models\",\"reload_custom_models\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"samp_export\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"model_view\",\"editor_groups\",\"editor_group_create\",\"editor_ungroup\",\"viewer_open\",\"custom_models\",\"reload_custom_models\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -2105,6 +2106,39 @@ handleRequest(const std::vector<std::string> &lines)
 		if(object == nil){ writeError(requestId, "viewer_open requires a model"); return; }
 		ModelViewerOpen(objectId, nil);
 		writeResponse(requestId, true, "\"model\":" + std::to_string(objectId));
+		return;
+	}
+	if(command == "editor_groups"){
+		// the editor's named groups: name, live members (instance ids), saved members not found yet
+		writeResponse(requestId, true, GroupsJson());
+		return;
+	}
+	if(command == "editor_group_create"){
+		// name id id ... - group existing objects under a name (like Ctrl+Shift+G in the editor)
+		if(lines.size() < 4 || lines[2].empty()){
+			writeError(requestId, "editor_group_create requires a name and at least one instance id"); return;
+		}
+		std::vector<ObjectInst*> members;
+		for(size_t i = 3; i < lines.size(); i++){
+			int id;
+			if(!parseInt(lines[i], &id)){ writeError(requestId, "invalid instance id"); return; }
+			ObjectInst *inst = GetInstanceByID(id);
+			if(inst == nil){ writeError(requestId, ("unknown instance id " + lines[i]).c_str()); return; }
+			members.push_back(inst);
+		}
+		char error[256] = "";
+		if(!GroupCreateNamed(lines[2].c_str(), members, error, sizeof(error))){
+			writeError(requestId, error); return;
+		}
+		writeResponse(requestId, true, GroupsJson());
+		return;
+	}
+	if(command == "editor_ungroup"){
+		// name - forget the group (its objects stay)
+		if(lines.size() < 3 || !GroupRemoveNamed(lines[2].c_str())){
+			writeError(requestId, "editor_ungroup requires the name of an existing group"); return;
+		}
+		writeResponse(requestId, true, GroupsJson());
 		return;
 	}
 	if(command == "model_view"){

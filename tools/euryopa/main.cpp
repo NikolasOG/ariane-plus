@@ -482,6 +482,8 @@ ClearEditorInputState(void)
 	memset(&CPad::oldMouseState, 0, sizeof(CPad::oldMouseState));
 	memset(&CPad::newMouseState, 0, sizeof(CPad::newMouseState));
 	memset(&CPad::tempMouseState, 0, sizeof(CPad::tempMouseState));
+	memset(CPad::latchedKeystates, 0, sizeof(CPad::latchedKeystates));
+	CPad::latchedMouseBtns = 0;
 	CPad::clickState = 0;
 	CPad::clickx = 0;
 	CPad::clicky = 0;
@@ -557,8 +559,10 @@ SyncEditorInputState(void)
 
 #ifdef RW_D3D9
 	if(ImGui::GetCurrentContext() &&
-	   (ImGui::GetIO().WantCaptureMouse || ImGuizmo::IsOver() || gGizmoHovered || gGizmoUsing))
+	   (ImGui::GetIO().WantCaptureMouse || ImGuizmo::IsOver() || gGizmoHovered || gGizmoUsing)){
 		CPad::tempMouseState.btns = 0;
+		CPad::latchedMouseBtns = 0;
+	}
 #else
 	if(ImGui::GetCurrentContext()){
 		ImGuiIO &io = ImGui::GetIO();
@@ -682,8 +686,8 @@ Init(void)
 	static char windowTitle[256];
 	static bool saveHookRegistered;
 	snprintf(windowTitle, sizeof(windowTitle),
-		"Ariane %s [%s] - Map Editor (GTA III, VC, SA) by Dryxio",
-		ARIANE_VERSION, ARIANE_CHANNEL_DISPLAY);
+		"Ariane Plus %s [%s] - Map Editor by Dryxio, edited by NikolasOG",
+		ARIANE_PLUS_VERSION, ARIANE_CHANNEL_DISPLAY);
 	sk::globals.windowtitle = windowTitle;
 	sk::globals.width = 1280;
 	sk::globals.height = 800;
@@ -909,8 +913,10 @@ AppEventHandler(sk::Event e, void *param)
 	case PLUGINATTACH:
 		return attachPlugins() ? EVENTPROCESSED : EVENTERROR;
 	case KEYDOWN:
-		if(input && !input->WantCaptureKeyboard && !input->WantTextInput && !ImGuizmo::IsOver())
+		if(input && !input->WantCaptureKeyboard && !input->WantTextInput && !ImGuizmo::IsOver()){
 			CPad::tempKeystates[*(int*)param] = 1;
+			CPad::latchedKeystates[*(int*)param] = 1;
+		}
 		return EVENTPROCESSED;
 	case KEYUP:
 		CPad::tempKeystates[*(int*)param] = 0;
@@ -918,6 +924,8 @@ AppEventHandler(sk::Event e, void *param)
 	case MOUSEBTN:
 		if(input && !input->WantCaptureMouse && !ImGuizmo::IsOver()){
 			ms = (MouseState*)param;
+			// the newly pressed buttons stay "down" until the next frame has seen them
+			CPad::latchedMouseBtns |= ms->buttons & ~CPad::tempMouseState.btns;
 			CPad::tempMouseState.btns = ms->buttons;
 		}else
 			CPad::tempMouseState.btns = 0;

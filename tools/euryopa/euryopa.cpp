@@ -1,4 +1,5 @@
 #include "euryopa.h"
+#include "groups.h"
 #include "agentbridge.h"
 #include "modloader.h"
 #include <limits.h>
@@ -995,6 +996,58 @@ GetGroundPlacementSurface(rw::V3d pos, rw::V3d *hitPos, rw::V3d *hitNormal, bool
 	return found;
 }
 
+// First collision surface straight below `from`, skipping `self` and its LOD; worldOnly also skips
+// the SA-MP layer (game surfaces only). hitZ / surface (surfinfo.dat index) / hitInst may be nil.
+bool
+SurfaceBelow(ObjectInst *self, rw::V3d from, bool worldOnly, float *hitZ, int *surface, ObjectInst **hitInst)
+{
+	Ray ray;
+	ray.start = from;
+	ray.dir = { 0.0f, 0.0f, -1.0f };
+	CPtrList *lists[6];
+	int numLists = 0;
+	if(from.x >= worldBounds.left && from.x < worldBounds.right &&
+	   from.y >= worldBounds.bottom && from.y < worldBounds.top){
+		Sector *s = GetSector(GetSectorIndexX(from.x), GetSectorIndexY(from.y));
+		lists[numLists++] = &s->buildings;
+		lists[numLists++] = &s->buildings_overlap;
+		lists[numLists++] = &s->bigbuildings;
+		lists[numLists++] = &s->bigbuildings_overlap;
+	}
+	lists[numLists++] = &outOfBoundsSector.buildings;
+	lists[numLists++] = &outOfBoundsSector.bigbuildings;
+
+	float best = 1.0e30f;
+	int bestSurface = -1;
+	ObjectInst *bestInst = nil;
+	for(int l = 0; l < numLists; l++)
+		for(CPtrNode *p = lists[l]->first; p; p = p->next){
+			ObjectInst *inst = (ObjectInst*)p->item;
+			if(inst == self || (self && inst == self->m_lod) || inst->m_isDeleted)
+				continue;
+			if(worldOnly && SampIsLayerInst(inst))
+				continue;
+			if(!CanSnapToInst(inst) || !PointInsideInstBounds(inst, from.x, from.y))
+				continue;
+			rw::V3d hit;
+			int surf = -1;
+			if(!IntersectRayColModelSurface(ray, inst, nil, &hit, &surf))
+				continue;
+			float drop = from.z - hit.z;
+			if(drop >= 0.0f && drop < best){
+				best = drop;
+				bestSurface = surf;
+				bestInst = inst;
+			}
+		}
+	if(best >= 1.0e30f)
+		return false;
+	if(hitZ) *hitZ = from.z - best;
+	if(surface) *surface = bestSurface;
+	if(hitInst) *hitInst = bestInst;
+	return true;
+}
+
 // Bounds of the model's rendered mesh (all vertices of the highest-detail
 // atomic, or of every atomic in a clump, in model space). Some models draw
 // their walls well above the bottom of their collision box, so snapping on
@@ -1581,7 +1634,8 @@ SnapSelectedToGround(bool alignRotation)
 
 	for(CPtrNode *p = selection.first; p; p = p->next){
 		ObjectInst *inst = (ObjectInst*)p->item;
-		if(inst->m_isDeleted)
+		// removal-only world buildings (SA-MP) can be selected but never moved
+		if(inst->m_isDeleted || !IsInstInIplMapDocument(inst))
 			continue;
 		if(inst->m_lod && CountSelectedHdChildren(inst->m_lod) > 1){
 			skipped++;
@@ -2553,6 +2607,20 @@ dogizmo(void)
 	// Build object matrix from instance
 	rw::convMatrix(&gizobj, &inst->m_matrix);
 
+	// A whole group (groups.cpp) rotates around its centre, not around the first object picked.
+	// The centre is frozen for the drag: rotating the members moves their bounding box.
+	static bool dragGroupPivot;
+	static rw::V3d dragStartPivot;
+	rw::V3d groupCentre = inst->m_translation;
+	bool groupPivot = gGizmoMode == GIZMO_ROTATE &&
+		(wasDragging ? dragGroupPivot : GroupSelectionPivot(&groupCentre));
+	if(groupPivot){
+		rw::V3d c = wasDragging ? dragStartPivot : groupCentre;
+		gizobj.pos.x = c.x;
+		gizobj.pos.y = c.y;
+		gizobj.pos.z = c.z;
+	}
+
 	cam = (rw::Camera*)rw::engine->currentCamera;
 	fview = (float*)&cam->devView;
 	fproj = (float*)&cam->devProj;
@@ -2587,6 +2655,8 @@ dogizmo(void)
 
 	// Capture start state when drag begins
 	if(isUsing && !wasDragging){
+		dragGroupPivot = groupPivot;
+		dragStartPivot = groupPivot ? groupCentre : inst->m_translation;
 		dragStartLeaderPos = inst->m_translation;
 		dragStartLeaderRot = NormalizeQuatOrIdentity(inst->m_rotation);
 		dragStartFollowGround = gGizmoMode == GIZMO_TRANSLATE && gDragFollowGround;
@@ -2713,8 +2783,9 @@ dogizmo(void)
 			rw::Quat worldQ = rw::conj(deltaQ);
 			for(int i = 0; i < (int)dragTransforms.size(); i++){
 				ObjectInst *obj = dragTransforms[i].inst;
-				rw::V3d offset = sub(dragTransforms[i].oldPos, dragStartLeaderPos);
-				obj->m_translation = add(dragStartLeaderPos, rw::rotate(offset, worldQ));
+				rw::V3d pivot = dragGroupPivot ? dragStartPivot : dragStartLeaderPos;
+				rw::V3d offset = sub(dragTransforms[i].oldPos, pivot);
+				obj->m_translation = add(pivot, rw::rotate(offset, worldQ));
 				obj->m_rotation = NormalizeQuatOrIdentity(rw::mult(dragTransforms[i].oldRot, deltaQ));
 				obj->m_isDirty = true;
 				obj->UpdateMatrix();

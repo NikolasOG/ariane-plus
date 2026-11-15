@@ -298,6 +298,10 @@ project "euryopa"
 	filter {}
 	includedirs { "tools/euryopa" }
 	files { "tools/euryopa/minilzo/minilzo.c" }
+	filter { "system:windows" }
+		files { "tools/euryopa/ariane.rc" }	-- Ariane Plus icon
+		resincludedirs { "tools/euryopa" }
+	filter {}
 	removeplatforms { "*null" }
 	removeplatforms { "ps2" }
 

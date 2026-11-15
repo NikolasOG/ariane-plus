@@ -1254,6 +1254,27 @@ def model_view(model: int | str, out_path: str, yaw: float = 45.0, pitch: float 
 
 
 @mcp.tool()
+def editor_groups() -> dict:
+	"""The editor's named object groups (Window > Groups, Ctrl+Shift+G): each group's name, live member
+	instance ids and how many saved members weren't found yet. Selecting one member in the editor selects
+	the whole group and the gizmo moves/rotates it as one."""
+	return service.client.command("editor_groups")
+
+
+@mcp.tool()
+def editor_group_create(name: str, instance_ids: list[int]) -> dict:
+	"""Group existing objects under a name so the user can select, move, duplicate, delete or save them
+	as a prefab as one unit in the editor. Objects leave any group they were in."""
+	return service.client.command("editor_group_create", name, *instance_ids)
+
+
+@mcp.tool()
+def editor_ungroup(name: str) -> dict:
+	"""Forget an editor group; its objects stay where they are."""
+	return service.client.command("editor_ungroup", name)
+
+
+@mcp.tool()
 def viewer_open(model: int | str) -> dict:
 	"""Open the editor's Model Viewer window on a model so the user can orbit around it and inspect its
 	materials, textures and collision."""

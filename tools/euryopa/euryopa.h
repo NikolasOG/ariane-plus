@@ -534,6 +534,7 @@ GameFile *GetOrCreateCurrentPlacementIplFile(void);
 int GetLodForObject(int id);
 int SnapSelectedToGround(bool alignRotation);
 bool GetGroundPlacementSurface(rw::V3d pos, rw::V3d *hitPos, rw::V3d *hitNormal = nil, bool ignoreSelection = false);
+bool SurfaceBelow(ObjectInst *self, rw::V3d from, bool worldOnly, float *hitZ, int *surface, ObjectInst **hitInst);
 bool GetPlacementSurfaceHit(rw::V3d *hitPos, rw::V3d *hitNormal);
 rw::V3d GetPlacementPosition(void);
 float GetPlacementBaseOffset(int objectId);
@@ -566,6 +567,17 @@ GameFile *SampGetLayerFile(void);
 bool SampIsLayerFile(const char *name);
 bool SampIsLayerInst(ObjectInst *inst);
 bool SampModeActive(void);
+// World-building removal: game buildings become RemoveBuildingForPlayer removals (never IPL edits)
+extern bool gSampAllowWorldRemoval;
+bool SampIsWorldBuilding(ObjectInst *inst);
+bool SampCanPickWorldBuilding(ObjectInst *inst);
+void SampDeleteSelection(void);	// Delete key / Object Info: asks first when world buildings are selected
+// SA-MP windows (samp.cpp): Removed Buildings, SA-MP Checks, Show in game, Object Info material editor
+void SampWindows(void);
+void SampOpenRemovedWindow(void);
+void SampOpenChecksWindow(void);
+void SampShowInGame(void);
+void SampMaterialsInspector(ObjectInst *inst);
 bool SampBlockGameSave(const char *action);
 bool SampCanImport(const char *path);
 int SampImportFile(const char *path);
@@ -850,7 +862,9 @@ ObjectInst *GetInstanceByID(int32 id);
 int32 pick(void);
 ObjectInst *AddInstance(void);
 void ClearSelection(void);
-void DeleteSelected(void);
+// removeWorldBuildings: also remove selected SA-MP world buildings outside the opened IPL
+// (see SampCanPickWorldBuilding); otherwise those stay, as ObjectInst::Delete refuses them
+void DeleteSelected(bool removeWorldBuildings = false);
 int DeleteAllInstances(void);
 void RemoveInstFromSectors(ObjectInst *inst);
 

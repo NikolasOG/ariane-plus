@@ -2,6 +2,7 @@
 #include "lod_associations.h"
 #include "modloader.h"
 #include "object_categories.h"
+#include "groups.h"
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -972,13 +973,17 @@ ObjectInst::JumpTo(void)
 void
 ObjectInst::Select(void)
 {
-	if(!IsInstInIplMapDocument(this)){
+	if(!IsInstInIplMapDocument(this) && !SampCanPickWorldBuilding(this)){
 		// Direct clicks and rectangle/list selection all converge here. Rate-limit
 		// the explanation so a drag across many reference objects yields one toast.
 		static double lastLockedReferenceToast = -100.0;
 		double now = ImGui::GetTime();
 		if(now - lastLockedReferenceToast >= 1.0){
-			if(IsIplMapDocumentOpen())
+			if(IsIplMapDocumentOpen() && SampModeActive() && SampIsWorldBuilding(this))
+				ToastFor(TOAST_SELECTION, 4.0f,
+				         "World building — only the opened IPL is editable. To remove it for SA-MP, "
+				         "turn on SA-MP > Allow removing world buildings (Ctrl+Shift+W).");
+			else if(IsIplMapDocumentOpen())
 				ToastFor(TOAST_SELECTION, 3.0f,
 				         "Reference object — only the opened IPL is editable.");
 			else if(m_file && IsExternalIplMapLogicalPath(m_file->name))
@@ -991,6 +996,7 @@ ObjectInst::Select(void)
 	if(m_selected) return;
 	m_selected = true;
 	selection.InsertItem(this);
+	GroupOnSelect(this);	// grouped: the rest of the group follows (groups.cpp guards recursion)
 }
 
 void
@@ -1002,8 +1008,9 @@ ObjectInst::Deselect(void)
 	for(p = selection.first; p; p = p->next)
 		if(p->item == this){
 			selection.RemoveNode(p);
-			return;
+			break;
 		}
+	GroupOnDeselect(this);
 }
 
 void
@@ -1078,8 +1085,31 @@ setDeletedWithoutCascade(ObjectInst *inst, bool deleted)
 		inst->m_isDirty = true;
 }
 
+// SA-MP: hide a world building outside the opened IPL. It becomes a RemoveBuildingForPlayer on
+// export; no IPL is written (SA-MP mode blocks game saves). ObjectInst::Delete refuses instances
+// outside the document, so this mirrors its LOD cascade without that guard.
+static void
+removeWorldBuilding(ObjectInst *inst)
+{
+	if(inst == nil || inst->m_isDeleted)
+		return;
+	inst->m_isDeleted = true;
+	StampChangeSeq(inst);
+	inst->Deselect();
+	// the far-away LOD would keep showing the building once its last HD child is gone
+	ObjectInst *lodInst = resolveInstanceLod(inst);
+	if(lodInst && !lodInst->m_isDeleted && countLiveLodChildren(lodInst, inst) == 0)
+		removeWorldBuilding(lodInst);
+	// removing a LOD removes the buildings it stands in for
+	for(CPtrNode *p = instances.first; p; p = p->next){
+		ObjectInst *other = (ObjectInst*)p->item;
+		if(!other->m_isDeleted && instanceReferencesLod(other, inst))
+			removeWorldBuilding(other);
+	}
+}
+
 void
-DeleteSelected(void)
+DeleteSelected(bool removeWorldBuildings)
 {
 	// Collect all instances that will be deleted (including LOD cascades)
 	// First, gather the selected ones
@@ -1110,8 +1140,13 @@ DeleteSelected(void)
 			previouslyLive.push_back(inst);
 	}
 
-	for(int i = 0; i < (int)toDelete.size(); i++)
-		toDelete[i]->Delete();
+	for(int i = 0; i < (int)toDelete.size(); i++){
+		ObjectInst *inst = toDelete[i];
+		if(removeWorldBuildings && !IsInstInIplMapDocument(inst) && SampCanPickWorldBuilding(inst))
+			removeWorldBuilding(inst);
+		else
+			inst->Delete();
+	}
 
 	std::vector<ObjectInst*> newlyDeleted;
 	for(size_t i = 0; i < previouslyLive.size(); i++)
@@ -3324,6 +3359,8 @@ ImportPrefabAt(const char *path, rw::V3d spawnPos)
 	}
 
 	log("ImportPrefab: placed %d instance(s) from %s\n", numPasted, path);
+	if(numPasted > 1)
+		GroupPlacedPrefab(path);	// the placed prefab becomes a named group
 	return numPasted;
 }
 
