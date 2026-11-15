@@ -555,7 +555,7 @@ normalizePersistentSettings(void)
 		extraColours = -1;
 	Weather::interpolation = clamp(Weather::interpolation, 0.0f, 1.0f);
 	TheCamera.m_fov = ClampCameraFov(TheCamera.m_fov);
-	TheCamera.m_LODmult = clamp(TheCamera.m_LODmult, 0.5f, 3.0f);
+	TheCamera.m_LODmult = clamp(TheCamera.m_LODmult, 0.5f, 5.0f);
 	gFlySpeed = clamp(gFlySpeed, 0.1f, 70.0f);
 	gFlyFastMul = clamp(gFlyFastMul, 1.0f, 10.0f);
 	gFlySlowMul = clamp(gFlySlowMul, 0.05f, 1.0f);
@@ -4010,6 +4010,8 @@ uiMainmenu(void)
 		if(ImGui::SmallButton("+")) ImGui::GetIO().FontGlobalScale *= 1.1f;
 		ImGui::Separator();
 		ImGui::Text("%.3f ms/frame %.1f FPS", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+		ImGui::Separator();
+		SampDrawDistanceSlider(true, true);
 		ImGui::EndMainMenuBar();
 	}
 	uiExportPrefabPopup();
@@ -5065,7 +5067,8 @@ uiView(void)
 	ImGui::RadioButton("Render only LOD", &gRenderMode, 2);
 	gRenderOnlyHD = gRenderMode == 1;
 	gRenderOnlyLod = gRenderMode == 2;
-	ImGui::SliderFloat("Draw Distance", &TheCamera.m_LODmult, 0.5f, 3.0f, "%.3f");
+	ImGui::SliderFloat("Draw Distance", &TheCamera.m_LODmult, 0.5f, 5.0f, "x%.2f");
+	SampDrawDistanceSlider(false);
 	ImGui::Checkbox("Render all Timed Objects", &gNoTimeCull);
 	if(params.numAreas)
 		ImGui::Checkbox("Render all Areas", &gNoAreaCull);

@@ -38,6 +38,9 @@ static char gSampGotoPlayer[32];
 static const char *kGotoModes[] = { "rcon", "script", "player", "all" };
 // server -> editor: a script calls Ariane_FocusEditor(At) (ariane.inc), Ariane moves its camera there
 static bool gSampFollowFocus = true;
+// SA-MP layer objects draw at least this far (0 = the model's own draw distance). 300 m is the streamer
+// plugin's default stream distance, so the map looks the way a player near it sees it.
+float gSampLayerDrawDist = 300.0f;
 
 static GameFile *gSampFile;
 static int gSampIplCounter;
@@ -1499,6 +1502,11 @@ LoadSettings(void)
 		}
 		else if(strncmp(line, "gotoplayer=", 11) == 0) strncpy(gSampGotoPlayer, line + 11, sizeof(gSampGotoPlayer) - 1);
 		else if(strncmp(line, "followfocus=", 12) == 0) gSampFollowFocus = atoi(line + 12) != 0;
+		else if(strncmp(line, "drawdist=", 9) == 0){
+			gSampLayerDrawDist = (float)atof(line + 9);
+			if(gSampLayerDrawDist < 0.0f) gSampLayerDrawDist = 0.0f;
+			if(gSampLayerDrawDist > 3000.0f) gSampLayerDrawDist = 3000.0f;
+		}
 	}
 	fclose(f);
 }
@@ -1518,6 +1526,7 @@ SaveSettings(void)
 	fprintf(f, "worldremove=%d\naskremove=%d\n", gSampAllowWorldRemoval ? 1 : 0, gSampAskWorldRemoval ? 1 : 0);
 	fprintf(f, "gotowho=%s\ngotoplayer=%s\n", kGotoModes[gSampGotoWho], gSampGotoPlayer);
 	fprintf(f, "followfocus=%d\n", gSampFollowFocus ? 1 : 0);
+	fprintf(f, "drawdist=%.0f\n", gSampLayerDrawDist);
 	fclose(f);
 }
 
@@ -1904,6 +1913,10 @@ SampMenu(void)
 	if(ImGui::IsItemHovered())
 		ImGui::SetTooltip("When a server script calls Ariane_FocusEditor(playerid) or Ariane_FocusEditorAt(x, y, z)\n"
 		                  "(ariane.inc; /arianefocus in the bundled filterscript), the camera flies there.");
+	if(ImGui::BeginMenu("Draw distance")){
+		SampDrawDistanceSlider(true);
+		ImGui::EndMenu();
+	}
 	if(ImGui::MenuItem("Reload from server", "Ctrl+Shift+L")) SampRequestReload();
 	if(ImGui::IsItemHovered())
 		ImGui::SetTooltip("Replace the SA-MP layer with what the server is running now\n(scriptfiles/ariane_live.txt from the last sync).");
@@ -1919,6 +1932,45 @@ SampMenu(void)
 	ImGui::Separator();
 	if(ImGui::MenuItem("Clear SA-MP layer")) ClearLayer();
 	ImGui::EndMenu();
+}
+
+// Live draw distance controls: map (SA-MP layer) objects and the world multiplier.
+// Shown in SA-MP > Draw distance and in the Render panel.
+void
+SampDrawDistanceSlider(bool withWorld, bool compact)
+{
+	static bool dirty;
+	static const char *mapTip =
+		"Map objects: objects of the SA-MP layer are drawn at least this far, so a whole map\n"
+		"shows from a distance. 0 = each model's own draw distance (small props vanish early).\n"
+		"300 m is the streamer plugin's default stream distance. Editor only: in game,\n"
+		"the streamer and each object's draw distance decide.";
+	static const char *worldTip =
+		"World: multiplier on every model's draw distance (game buildings too).\n"
+		"Higher keeps detailed buildings instead of their LODs further away; slower.";
+	if(compact){
+		ImGui::TextUnformatted("Draw");
+		ImGui::SameLine();
+	}
+	ImGui::SetNextItemWidth(compact ? 120.0f : 220.0f);
+	ImGui::SliderFloat(compact ? "##sampddbar" : "Map objects##sampdd", &gSampLayerDrawDist, 0.0f, 3000.0f,
+	                   gSampLayerDrawDist < 1.0f ? (compact ? "map: model" : "model distance")
+	                                             : (compact ? "map %.0f m" : "%.0f m"),
+	                   ImGuiSliderFlags_Logarithmic);
+	if(ImGui::IsItemEdited()) dirty = true;
+	if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mapTip);
+	if(withWorld){
+		if(compact) ImGui::SameLine();
+		ImGui::SetNextItemWidth(compact ? 90.0f : 220.0f);
+		ImGui::SliderFloat(compact ? "##sampddworldbar" : "World##sampddworld", &TheCamera.m_LODmult, 0.5f, 5.0f,
+		                   compact ? "world x%.1f" : "x%.2f");
+		if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s", worldTip);
+	}
+	if(dirty && !ImGui::IsAnyItemActive()){
+		dirty = false;
+		if(gSampLayerDrawDist < 1.0f) gSampLayerDrawDist = 0.0f;
+		SaveSettings();
+	}
 }
 
 void

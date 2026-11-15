@@ -112,6 +112,17 @@ AddToLodRenderList(ObjectInst *inst, float dist)
 		AddToRenderList(inst, dist);
 }
 
+// Draw distance: the model's own times the world multiplier. SA-MP layer objects can be drawn
+// further (SA-MP > Draw distance), so a whole map shows from a distance.
+static inline float
+MaxDrawDist(ObjectInst *inst, ObjectDef *obj)
+{
+	float d = obj->GetLargestDrawDist()*TheCamera.m_LODmult;
+	if(gSampLayerDrawDist > d && SampIsLayerInst(inst))
+		d = gSampLayerDrawDist;
+	return d;
+}
+
 // Don't assume there are LODs, just draw if below draw distance
 static int
 SetupVisibilitySimple(ObjectInst *inst, float *distout)
@@ -135,7 +146,7 @@ SetupVisibilitySimple(ObjectInst *inst, float *distout)
 			return VIS_INVISIBLE;
 
 		camdist = TheCamera.distanceTo(inst->m_translation);
-		if(camdist >= obj->GetLargestDrawDist()*TheCamera.m_LODmult)
+		if(camdist >= MaxDrawDist(inst, obj))
 			return VIS_INVISIBLE;
 
 		if(!gNoTimeCull && obj->m_isTimed && !IsHourInRange(obj->m_timeOn, obj->m_timeOff))
@@ -189,7 +200,7 @@ SetupVisibilityIII(ObjectInst *inst, float *distout)
 			return VIS_INVISIBLE;
 
 		camdist = TheCamera.distanceTo(inst->m_translation);
-		if(camdist >= obj->GetLargestDrawDist()*TheCamera.m_LODmult)
+		if(camdist >= MaxDrawDist(inst, obj))
 			return VIS_INVISIBLE;
 		if(camdist < obj->m_minDrawDist*TheCamera.m_LODmult)
 			if(hdobj == nil || hdobj->IsLoaded())
@@ -244,7 +255,7 @@ SetupVisibilitySA(ObjectInst *inst, float camdist)
 		if(obj->m_isHidden)
 			return VIS_INVISIBLE;
 
-		if(camdist >= obj->GetLargestDrawDist()*TheCamera.m_LODmult)
+		if(camdist >= MaxDrawDist(inst, obj))
 			return VIS_INVISIBLE;
 
 		if(!gNoTimeCull && obj->m_isTimed && !IsHourInRange(obj->m_timeOn, obj->m_timeOff))

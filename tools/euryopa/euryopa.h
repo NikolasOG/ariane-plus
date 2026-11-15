@@ -566,6 +566,7 @@ extern bool gSampProtectGameFiles;
 GameFile *SampGetLayerFile(void);
 bool SampIsLayerFile(const char *name);
 bool SampIsLayerInst(ObjectInst *inst);
+extern float gSampLayerDrawDist;	// SA-MP layer objects draw at least this far (0 = model distance)
 bool SampModeActive(void);
 // World-building removal: game buildings become RemoveBuildingForPlayer removals (never IPL edits)
 extern bool gSampAllowWorldRemoval;
@@ -574,6 +575,7 @@ bool SampCanPickWorldBuilding(ObjectInst *inst);
 void SampDeleteSelection(void);	// Delete key / Object Info: asks first when world buildings are selected
 // SA-MP windows (samp.cpp): Removed Buildings, SA-MP Checks, Show in game, Object Info material editor
 void SampWindows(void);
+void SampDrawDistanceSlider(bool withWorld, bool compact = false);	// top bar, SA-MP > Draw distance, Render panel
 void SampOpenRemovedWindow(void);
 void SampOpenChecksWindow(void);
 void SampShowInGame(void);

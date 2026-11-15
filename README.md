@@ -87,6 +87,8 @@ stats; place it or fly to the nearest one.
 
 ### And more
 
+- **Draw distance in the top bar**, next to the FPS counter: draw map objects up to 3 km away (300 m by
+  default, the streamer's stream distance) and scale the world's draw distance, live.
 - **Mapping styles**: curated model sets (for example *wasteland*) for consistent maps.
 - **Building blocks**: exact-size plain shapes to compose and retexture custom objects.
 - Fixes: dropped quick clicks and key taps, lost or squashed panels, mirrored thumbnails, and more.
@@ -95,14 +97,31 @@ The full list of changes is in [SAMP-EDITION.md](SAMP-EDITION.md).
 
 ## Proof of concept: Carson Haven
 
-A wasteland settlement mapped in and around Fort Carson with Ariane Plus — about 850 objects, 36 removed
-game buildings and retextured lots, mapped largely through the AI agent toolkit, then checked and refined
-in the editor with the tools above. All screenshots are taken inside Ariane Plus.
+A wasteland settlement mapped in and around Fort Carson with Ariane Plus: about 850 objects, 36 removed
+game buildings, ruined lots and retextured pieces. All screenshots are taken inside Ariane Plus.
+
+<p align="center"><img src="docs/plus/carson_panorama.jpg" width="900" alt="Carson Haven from above"></p>
+
+> **Made with Ariane Plus's agentic capabilities, hooked into Claude.** Claude drove the editor through
+> the Ariane Plus agent toolkit (the `arianectl` CLI and MCP server): it scanned the ground, laid out the
+> settlement, placed, settled and retextured the objects and removed the game buildings in the way.
+> The result was then checked and refined in the editor with the tools above.
+
+**The settlement**
 
 | | |
 |---|---|
 | ![The container compound](docs/plus/carson_compound.jpg) | ![Inside the compound](docs/plus/carson_courtyard.jpg) |
-| ![The shanty town](docs/plus/carson_shanty.jpg) | ![The town blocks](docs/plus/carson_blocks.jpg) |
+| ![The shanty town](docs/plus/carson_shanty.jpg) | ![Looking toward the town](docs/plus/carson_blocks.jpg) |
+
+**Changes around Fort Carson**: houses removed and replaced with burnt-out lots, wrecks and rubble, and
+the settlement running up to the edge of town.
+
+| | |
+|---|---|
+| ![West Fort Carson: a ruined lot where houses stood](docs/plus/fortcarson_west.jpg) | ![East Fort Carson: rubble in place of a house](docs/plus/fortcarson_east.jpg) |
+
+<p align="center"><img src="docs/plus/fortcarson_edge.jpg" width="720" alt="The settlement at the edge of town"></p>
 
 ## Server side: ariane.inc
 

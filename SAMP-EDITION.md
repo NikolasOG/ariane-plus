@@ -72,6 +72,11 @@ ever touching your game's IPL files. This file is the detailed list of what chan
   shows every texture in a TXD as thumbnails (the model's own TXD is filled in), the colour box sets the
   material colour, Clear removes the override. Copy materials / Paste to selection copies a look across
   objects. Same data as the agent's `material` commands; it syncs and exports like any edit.
+- **Draw distance** — in the top bar next to the FPS counter (also SA-MP > Draw distance and the Render
+  panel). *Map* draws SA-MP layer objects at least this far (0 = each model's own distance, default 300 m,
+  the streamer's default stream distance, up to 3 km), so a whole map shows from a distance; *World*
+  multiplies every model's draw distance (0.5–5×). Editor only: in game the streamer and each object's
+  draw distance decide.
 - All SA-MP shortcuts are listed under **SA-MP** in Window > Keyboard Shortcuts.
 
 ## Model Viewer
