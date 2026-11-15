@@ -117,6 +117,8 @@ bool IntersectRayColModelSurface(const Ray &worldRay, ObjectInst *inst, const rw
 extern bool gCameraOrtho;		// agent top-down capture: parallel projection
 extern float gCameraOrthoHalfWidth;
 bool SampAgentSync(const char *mapName, bool force, int *objects, int *removals, char *message, size_t messageSize);
+bool SampAgentExport(const char *path, int format, const char *mapName, const char *prefix, int *objects, int *removals,
+	char *message, size_t messageSize);
 
 //
 // Options
@@ -571,6 +573,8 @@ bool SampSyncToServer(void);
 int SampLoadFromServer(void);
 void SampMenu(void);
 void SampPopups(void);
+void SampShortcuts(bool allowEditorShortcuts);
+int SampCopySelectionAsPawn(void);
 void SampLoadDefinitions(void);
 bool SampModelsLoaded(void);
 // SA-MP material overrides (SetDynamicObjectMaterial / ...Text) on layer objects

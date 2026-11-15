@@ -1074,9 +1074,20 @@ def custom_model_add(server_dir: str, dff_path: str, txd_path: str, base_id: int
 
 # ---------------------------------------------------------------- server
 @mcp.tool()
+def samp_export(out_path: str, format: Literal["streamer", "native", "wrapper", "current"] = "current",
+                map_name: str | None = None, prefix: str | None = None) -> dict:
+	"""SA-MP > Export Pawn: the layer (objects, removals, materials) as a Pawn include. streamer =
+	CreateDynamicObject (streamer plugin); native = CreateObject (open.mp and SA-MP share these natives); wrapper =
+	<prefix>CreateObject / RemoveBuilding / SetObjectMaterial functions defined by the user's script."""
+	fmt = {"wrapper": 0, "streamer": 1, "native": 2, "current": -1}[format]
+	return service.client.command("samp_export", str(Path(out_path).resolve()), fmt, map_name or "-", prefix or "-")
+
+
+@mcp.tool()
 def samp_sync(map_name: str | None = None, force: bool = False) -> dict:
 	"""SA-MP > Sync to server: writes scriptfiles/ariane_live.txt (objects, removals, materials) which the running
-	gamemode reloads within seconds, plus gamemodes/wasteland/maps/<map>.inc. Refuses an empty layer unless force."""
+	server reloads within seconds (tools/samp/ariane_live.pwn filterscript), plus the Pawn include if enabled in
+	SA-MP > Server folder. Refuses an empty layer unless force."""
 	return service.client.command("samp_sync", map_name or "-", int(force))
 
 

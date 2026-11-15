@@ -3,7 +3,7 @@
 Mirrors SetDynamicObjectMaterial and SetDynamicObjectMaterialText. Overrides
 are drawn in the editor (text materials show as their background colour),
 saved in checkpoints and prefabs, exported to Pawn in the selected format and
-written to the live sync file (the custom gamemode applies them).
+written to the live sync file (the ariane_live filterscript applies them).
 
 Colours are ARGB ints or strings ("0xFF808080"); 0 keeps the model's colour.
 A material index is the slot in the model's material list - see

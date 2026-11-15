@@ -1027,7 +1027,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"custom_models\",\"reload_custom_models\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"samp_export\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"custom_models\",\"reload_custom_models\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -1965,6 +1965,23 @@ handleRequest(const std::vector<std::string> &lines)
 		gAgentCaptureCameraRevision = gAgentCameraRevision;
 		gAgentPendingRequestId = requestId;
 		gAgentCapturePending = true;
+		return;
+	}
+	if(command == "samp_export"){
+		// path [format 0 wrapper / 1 streamer / 2 native / -1 current] [map_name|-] [wrapper prefix|-]
+		int format = -1;
+		if(lines.size() < 3 || lines[2].empty() || (lines.size() > 3 && !parseInt(lines[3], &format))){
+			writeError(requestId, "samp_export requires path [format] [map_name|-] [prefix|-]"); return;
+		}
+		const char *name = lines.size() > 4 && lines[4] != "-" ? lines[4].c_str() : nil;
+		const char *prefix = lines.size() > 5 && lines[5] != "-" ? lines[5].c_str() : nil;
+		int objects = 0, removals = 0;
+		char message[1400];
+		bool ok = SampAgentExport(lines[2].c_str(), format, name, prefix, &objects, &removals, message, sizeof(message));
+		std::string body = std::string("\"objects\":") + std::to_string(objects) + ",\"removals\":" +
+			std::to_string(removals) + ",\"message\":\"" + jsonEscape(message) + "\"";
+		if(!ok) body = std::string("\"error\":\"") + jsonEscape(message) + "\"," + body;
+		writeResponse(requestId, ok, body);
 		return;
 	}
 	if(command == "samp_sync"){

@@ -88,7 +88,7 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	settle.add_argument("--edge-stat", choices=("p25", "max"), default="p25",
 	                    help="--visual: p25 = typical wall bottom per side (buildings); max = every edge must touch "
 	                         "the ground (mounds, heaps, slabs)")
-	settle.add_argument("--floor-models", type=int, nargs="*", default=[18981, 19543, 19544, 19545],
+	settle.add_argument("--floor-models", type=int, nargs="*", default=[18981, 19543, 19544, 19545, 19700, 19741],
 	                    help="placed models that count as ground (slabs, ground planes)")
 	mat = sub.add_parser("material", help="SA-MP material overrides: retexture / recolour / text on placed objects")
 	mat_sub = mat.add_subparsers(dest="material_command", required=True)
@@ -211,8 +211,13 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	lintp.add_argument("--protect", type=int, nargs="*", default=[])
 	lintp.add_argument("--max", type=int, default=40, help="issues to print")
 	ssync = sub.add_parser("samp-sync", help="SA-MP > Sync to server (writes scriptfiles/ariane_live.txt)")
-	ssync.add_argument("--map", help="map name (also used for gamemodes/wasteland/maps/<name>.inc)")
+	ssync.add_argument("--map", help="map name (also the name of the include written on sync, if enabled)")
 	ssync.add_argument("--force", action="store_true", help="allow syncing an empty layer")
+	sexp = sub.add_parser("samp-export", help="SA-MP > Export Pawn to a file (streamer, native open.mp / SA-MP, wrapper)")
+	sexp.add_argument("--out", type=Path, required=True)
+	sexp.add_argument("--format", choices=("streamer", "native", "wrapper", "current"), default="current")
+	sexp.add_argument("--map", help="map name (function names CreateMap_<name> / RemoveMap_<name>)")
+	sexp.add_argument("--prefix", help="wrapper format: function prefix (default from settings, e.g. Map_)")
 	suppress = sub.add_parser("suppress-world-models")
 	suppress.add_argument("x", type=float); suppress.add_argument("y", type=float)
 	suppress.add_argument("radius", type=float); suppress.add_argument("model_ids", type=int, nargs="+")
@@ -651,6 +656,10 @@ def main(argv: list[str] | None = None) -> int:
 			else:
 				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
 				                               args.heading, snap=not args.no_snap, base_z=args.base_z)
+		elif args.command == "samp-export":
+			fmt = {"wrapper": 0, "streamer": 1, "native": 2, "current": -1}[args.format]
+			payload = ArianeClient(args.socket, args.timeout).command("samp_export", str(args.out.resolve()), fmt,
+			                                                          args.map or "-", args.prefix or "-")
 		elif args.command in {"ground-scan", "track-mask", "capture-ortho", "samp-sync"}:
 			if __package__:
 				from . import ground

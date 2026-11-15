@@ -144,7 +144,7 @@ def place_rows(service, rows: list[dict], key_prefix: str = "place") -> list[dic
 
 # ------------------------------------------------------------------ settle
 def settle(service, client, *, bbox=None, models=None, ids=None, min_gap=0.05, dry_run=False, visual=False,
-           max_sink=3.0, edge_stat="p25", floor_models=(18981, 19543, 19544, 19545)) -> dict:
+           max_sink=3.0, edge_stat="p25", floor_models=(18981, 19543, 19544, 19545, 19700, 19741)) -> dict:
 	"""Dig placed objects into the terrain: lower each stack until its lowest
 	footprint point touches the ground (raycasts skip placed objects except
 	floor_models). visual=True grounds drawn walls instead (mesh profile per

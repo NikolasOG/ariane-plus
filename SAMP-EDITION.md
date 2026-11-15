@@ -26,13 +26,19 @@ SA-MP / open.mp server without ever touching your game's IPL files.
 - Place objects with the normal object browser / spawner / prefabs — they join the layer.
 - **Delete a stock building** → exported as `RemoveBuildingForPlayer` (its LOD too).
   **Move a stock building** → exported as remove + a copy at the new spot.
-- **Export Pawn…** — custom helpers (`Map_CreateObject` / `Map_RemoveBuilding`), streamer
-  (`CreateDynamicObject`) or native (`CreateObject`).
+- **Export Pawn…** (Ctrl+Shift+P) — streamer plugin (`CreateDynamicObject`), native open.mp /
+  SA-MP (`CreateObject`; both servers share these natives) or your own wrapper functions
+  (`<prefix>CreateObject` / `<prefix>RemoveBuilding` / `<prefix>SetObjectMaterial`, prefix
+  configurable). Material overrides are exported with the matching material calls.
+- **Copy selection as Pawn** (Ctrl+Shift+C) — selected objects as code in the export format.
 - **Reload from server** — rebuild the layer from what the server runs now. Ariane does this
   automatically on start, and asks before a sync would wipe a non-empty server map.
-- **Server folder…** then **Sync to server** — writes `scriptfiles/ariane_live.txt` (the
-  custom gamemode picks it up within ~3 s) and, optionally,
-  `gamemodes/wasteland/maps/<name>.inc`.
+- **Server folder…** then **Sync to server** (Ctrl+Shift+S) — writes
+  `scriptfiles/ariane_live.txt` and, optionally, `<server>/<include folder>/<name>.inc` in the
+  export format. The bundled filterscript [`tools/samp/ariane_live.pwn`](tools/samp/ariane_live.pwn)
+  polls the live file and rebuilds the map within ~3 s on any open.mp / SA-MP server
+  (streamer plugin required).
+- All SA-MP shortcuts are listed under **SA-MP** in Window > Keyboard Shortcuts.
 
 ## Mapping with an AI agent
 Point an agent at [`SKILLS.md`](SKILLS.md) first: preflight checks, the build loop and

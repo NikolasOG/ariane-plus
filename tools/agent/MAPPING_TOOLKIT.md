@@ -67,8 +67,9 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 * Scaffolding/boarding only on real walls: `facade` probes the wall at two
   heights and rejects galleries and overhangs - do not line bounding boxes.
 * Night: SA-MP objects lack the prelighting of stock buildings, so painted
-  props glow at night. The custom gamemode tints outdoor map objects by hour;
-  objects with custom materials are left out of the tint (see 5).
+  props glow at night. A gamemode can tint outdoor map objects by hour with a
+  material colour (modelid -1, "none", "none", ARGB) - skip objects that carry
+  their own materials, the tint would replace them.
 
 ## 3. Tool map
 
@@ -92,6 +93,7 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 | `material set/preset/text/clear/get/copy/model/txd/presets` | `material_*`, `model_materials`, `txd_textures`, `texture_presets` | retexturing |
 | `custom-models list/reload/add` | `custom_models_list/reload`, `custom_model_add` | AddSimpleModel models |
 | `samp-sync` | `samp_sync` | push to the server |
+| `samp-export --format streamer\|native\|wrapper` | `samp_export` | Pawn include file (open.mp and SA-MP share the native API) |
 | `checkpoint save/restore/list` | (service calls) | full snapshots incl. removals + materials |
 
 Python: the same functions live in `mapping_tools`, `ground`, `lint`,
@@ -158,9 +160,11 @@ open.mp serves `<server>/models` to players; `models/artconfig.txt` lists
 * `img_extract.py <gta3.img> <out> name.dff name.txd` pulls stock files to start
   from or to test with.
 
-## 7. Server side (custom gamemode)
+## 7. Server side
 
-`scriptfiles/ariane_live.txt`, polled by `gamemodes/wasteland/ariane_live.inc`:
+`scriptfiles/ariane_live.txt` is written on every sync. Load the bundled
+filterscript `tools/samp/ariane_live.pwn` (streamer plugin) and the server
+rebuilds the map within ~3 s; or parse the file in your own gamemode:
 
 ```
 rev <n>
@@ -170,9 +174,9 @@ M <index> <model> <txd> <texture> <ARGB>           material of the object above
 T <index> <size> <fontsize> <bold> <fontARGB> <backARGB> <align> <font_with_underscores> <text, \n escapes>
 ```
 
-Pawn helpers: `Map_CreateObject`, `Map_RemoveBuilding`, `Map_SetObjectMaterial`,
-`Map_SetObjectMaterialText` (`world.inc`). Another gamemode can use the
-streamer or native export formats (SA-MP > Export) instead.
+For a static map use SA-MP > Export Pawn (streamer, native open.mp / SA-MP,
+or wrapper functions with your own prefix). The sync can also write that
+include on every sync (SA-MP > Server folder...).
 
 ## 8. Troubleshooting
 

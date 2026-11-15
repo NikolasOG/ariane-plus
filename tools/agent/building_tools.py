@@ -115,8 +115,10 @@ def replace_building(service, x, y, new_model, *, old_model=None, heading_offset
 				misses += 1
 		if misses >= 3:
 			ground = pz + az
-			slabs = fill_ground(service, px, py, h, ob, ground)
-			z_fixed = ground - _visual_bottom(service, new_model) + 0.02 if dz is None else pz + dz
+			fill_report = {}
+			slabs = fill_ground(service, px, py, h, ob, ground, report=fill_report)
+			fill_top = fill_report.get("top", ground - 0.12)
+			z_fixed = fill_top - _visual_bottom(service, new_model) + 0.02 if dz is None else pz + dz
 	op = {"action": "place", "key": f"replace:{uuid.uuid4().hex[:10]}", "model": new_model, "x": wx, "y": wy,
 	      "z": z_fixed if z_fixed is not None else pz, "heading": (h + heading_offset) % 360,
 	      "snap": snap and z_fixed is None}
@@ -131,7 +133,7 @@ def replace_building(service, x, y, new_model, *, old_model=None, heading_offset
 		result["dangling_wire_ends"] = ends
 		if ends and wire_poles:
 			pb = _visual_bottom(service, WIRE_POLE)
-			ground = pz + az - (0.12 if slabs else 0.0)
+			ground = fill_top if slabs else pz + az
 			service.apply_scene_patch([{"action": "place", "key": f"wirepole:{uuid.uuid4().hex[:10]}", "model": WIRE_POLE,
 			                            "x": e[0], "y": e[1], "z": ground - pb, "heading": 0.0, "snap": False} for e in ends])
 			result["wire_poles"] = len(ends)
@@ -181,38 +183,103 @@ def _inside_quad(px, py, quad):
 
 
 SLAB = 18981          # SA-MP Concrete1mx25mx25m: modelled upright (1 m thick along X) -> roll 90 to lie flat
-GROUND_PLANES = {"sand": 19544, "grass": 19543, "concrete": 19545}   # flat 15 x 62.5 m planes
+GROUND_PLANES = {"sand": 19544, "grass": 19543, "concrete": 19545}   # flat 15 x 62.5 m planes (floor models for settle/lint)
+# Lot fill: flat SA-MP panels tiled over the footprint only (the 62.5 m planes
+# overhang the lot by up to 31 m and show through lower roads next to it),
+# retextured with the stock ground planes' own textures.
+GROUND_TILES = ((12.5, 19700, 0.125), (6.25, 19741, 0.0625))      # (size, model, half thickness)
+GROUND_TEXTURES = {"sand": (19544, "beach_sfs", "ws_drysand"), "grass": (19543, "beach_sfs", "Grass_128HV"),
+                   "concrete": (19545, "cs_ebridge", "pavea256")}
 
 
-def fill_ground(service, px, py, heading, bounds, ground_z, surface="sand", sink=0.12) -> list[int]:
+def _world_ground(service, x, y, z_from, depth=12.0):
+	"""Height of the first world (non-placed) surface below (x, y, z_from), or None."""
+	z = z_from
+	for _ in range(8):
+		hit = service.client.raycast_segment([x, y, z], [x, y, z_from - depth]).get("hit")
+		if not hit:
+			return None
+		if not hit.get("agent_scene"):
+			return hit["point"][2]
+		z = hit["point"][2] - 0.02
+	return None
+
+
+def lot_rim(service, px, py, heading, bounds, ground_z, out=0.6, samples=9) -> dict:
+	"""World ground height just outside each side of a footprint (median of a row
+	of raycasts): what a lot fill has to meet - sidewalk, yard, road."""
+	(ax, ay, _), (bx, by, _) = bounds
+	h = math.radians(heading); c, s = math.cos(h), math.sin(h)
+	sides = {"-x": [(ax - out, ay + (by - ay) * (k + 0.5) / samples) for k in range(samples)],
+	         "+x": [(bx + out, ay + (by - ay) * (k + 0.5) / samples) for k in range(samples)],
+	         "-y": [(ax + (bx - ax) * (k + 0.5) / samples, ay - out) for k in range(samples)],
+	         "+y": [(ax + (bx - ax) * (k + 0.5) / samples, by + out) for k in range(samples)]}
+	rim = {}
+	for side, pts in sides.items():
+		zs = sorted(z for z in (_world_ground(service, px + lx * c - ly * s, py + lx * s + ly * c, ground_z + 6.0)
+		                        for lx, ly in pts) if z is not None and abs(z - ground_z) < 1.5)
+		rim[side] = zs[len(zs) // 2] if len(zs) >= 3 else None
+	return rim
+
+
+def fill_ground(service, px, py, heading, bounds, ground_z, surface="sand", sink=0.12, *, match_rim=True,
+                tuck=0.5, report: dict | None = None) -> list[int]:
 	"""Cover a building footprint whose ground went with it.
 
-	Default: flat 15 x 62.5 m sand/grass/concrete planes laid side by side a few
-	cm below the old ground level - inside the hole they read as a cleared lot,
-	elsewhere they sit hidden under the existing ground. surface="slab" tiles
-	tilted 25 m concrete slabs instead (renders dark in some lighting)."""
+	Default: flat 12.5 m SA-MP panels (6.25 m for small lots) tiled over the
+	footprint, retextured with the stock sand/grass/concrete ground texture.
+	match_rim: the fill's top is set 2 cm under the surrounding ground measured
+	just outside the lot (lot_rim), and the tiles slide `tuck` m under every
+	side whose ground is at least that high (a sidewalk or yard), so no slit is
+	left at the edge to see through. Sides that drop away (a lower road) get no
+	overhang. Without a usable rim the top sits `sink` m below ground_z. The
+	last row/column is pulled back flush with the edge (2 cm lower where it
+	overlaps its neighbour). surface="slab" tiles tilted 25 m concrete slabs
+	instead (renders dark in some lighting)."""
 	(ax, ay, _), (bx, by, _) = bounds
 	h = math.radians(heading); c, s = math.cos(h), math.sin(h)
 	if surface == "slab":
 		return _fill_slabs(service, px, py, heading, bounds, ground_z)
-	model = GROUND_PLANES.get(surface, 19544)
+	top = ground_z - sink
+	if match_rim:
+		rim = lot_rim(service, px, py, heading, bounds, ground_z)
+		levels = sorted(v for v in rim.values() if v is not None)
+		if levels:
+			top = levels[len(levels) // 2] - 0.02
+			ext = {k: (tuck if v is not None and v >= top - 0.03 else 0.0) for k, v in rim.items()}
+			ax -= ext["-x"]; bx += ext["+x"]; ay -= ext["-y"]; by += ext["+y"]
+			if report is not None:
+				report.update({"rim": {k: (round(v, 3) if v is not None else None) for k, v in rim.items()},
+				               "top": round(top, 3), "tucked_sides": [k for k, v in ext.items() if v]})
+	tex_model, txd, texture = GROUND_TEXTURES.get(surface, GROUND_TEXTURES["sand"])
 	w = bx - ax; d = by - ay
-	# planes are 15 wide (local X) and 62.5 long (local Y): lay strips across the longer side
-	along_y = d >= w
-	span = w if along_y else d
-	strips = max(1, math.ceil(span / 15.0))
+	size, model, half = GROUND_TILES[0] if min(w, d) >= GROUND_TILES[0][0] else GROUND_TILES[1]
+
+	def axis(lo, hi):
+		"""Tile centres from lo to hi; the last tile is pulled back flush with hi (overlapping its neighbour)."""
+		n = max(1, math.ceil((hi - lo) / size - 1e-6))
+		if n == 1:
+			return [((lo + hi) / 2, False)]
+		centres = [(lo + size / 2 + i * size, False) for i in range(n)]
+		if centres[-1][0] + size / 2 > hi + 1e-6:
+			centres[-1] = (hi - size / 2, True)
+		return centres
+
 	ops, keys = [], []
-	for i in range(strips):
-		t = (i + 0.5) / strips
-		lx, ly = (ax + w * t, (ay + by) / 2) if along_y else ((ax + bx) / 2, ay + d * t)
-		hh = heading if along_y else heading + 90
-		key = f"ground:{uuid.uuid4().hex[:10]}"
-		keys.append(key)
-		ops.append({"action": "place", "key": key, "model": model, "x": px + lx * c - ly * s,
-		            "y": py + lx * s + ly * c, "z": ground_z - sink, "heading": hh % 360, "snap": False})
+	for lx, shifted_x in axis(ax, bx):
+		for ly, shifted_y in axis(ay, by):
+			key = f"ground:{uuid.uuid4().hex[:10]}"
+			keys.append(key)
+			# overlapping tiles sit 2 cm lower so the two never z-fight
+			z = top - half - (0.02 if (shifted_x or shifted_y) else 0.0)
+			ops.append({"action": "place", "key": key, "model": model, "x": px + lx * c - ly * s,
+			            "y": py + lx * s + ly * c, "z": z, "heading": heading % 360, "snap": False})
 	service.apply_scene_patch(ops)
 	scene = {i.get("object_key"): i for i in service.enumerate_scene()}
-	return [scene[k]["instance_id"] for k in keys if k in scene]
+	ids = [scene[k]["instance_id"] for k in keys if k in scene]
+	for iid in ids:   # same texture as the stock ground planes
+		service.engine("set_material", [iid, 0, tex_model, txd, texture, "0"])
+	return ids
 
 
 def _fill_slabs(service, px, py, heading, bounds, ground_z, slab=SLAB, size=25.0) -> list[int]:

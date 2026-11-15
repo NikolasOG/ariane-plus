@@ -47,8 +47,10 @@ look  -> plan -> place -> settle -> lint -> look -> checkpoint -> sync
 6. **Look again** from above and at player height (`capture-pose` /
    `capture_from_pose`). Lint cannot see ugliness, open-backed models or
    gaps under objects.
-7. **Checkpoint**, then **sync**: `samp-sync` (`samp_sync`). The server
-   reloads within ~3 s.
+7. **Checkpoint**, then **sync**: `samp-sync` (`samp_sync`). A server running
+   the bundled `tools/samp/ariane_live.pwn` filterscript reloads within ~3 s.
+   For a static map: `samp-export --format streamer|native|wrapper` (`samp_export`).
+   In the editor all SA-MP actions have Ctrl+Shift shortcuts (Window > Keyboard Shortcuts > SA-MP).
 
 ## 3. Recipes
 

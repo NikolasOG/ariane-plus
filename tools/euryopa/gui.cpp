@@ -4724,6 +4724,14 @@ uiKeyboardShortcutsWindow(void)
 		{ "Water", "Shift+click while creating", "Keep creating after placing water polygon", "Water create mode" },
 		{ "Water", "Ctrl+D", "Duplicate selected water polygons", "Water edit mode" },
 		{ "Water", "RMB / Esc", "Cancel water creation or exit water edit mode", "Water edit mode" },
+
+		{ "SA-MP", "Ctrl+Shift+S", "Sync the SA-MP layer to the server (scriptfiles/ariane_live.txt)", "Global" },
+		{ "SA-MP", "Ctrl+Shift+L", "Reload the layer from the server (asks first if the layer has edits)", "Global" },
+		{ "SA-MP", "Ctrl+Shift+P", "Export Pawn... (streamer, native open.mp / SA-MP or wrapper functions)", "Global" },
+		{ "SA-MP", "Ctrl+Shift+C", "Copy selected objects as Pawn code in the export format", "Global" },
+		{ "SA-MP", "Ctrl+Shift+O", "Import an SA-MP / Texture Studio / MTA map", "Global" },
+		{ "SA-MP", "Drop file on window", "Import .pwn / .inc / .txt / .map", "Global" },
+		{ "SA-MP", "Delete stock building", "Exported as RemoveBuildingForPlayer (with its LOD)", "SA-MP mode" },
 	};
 
 	ImGui::SetNextWindowSize(ImVec2(780, 620), ImGuiCond_FirstUseEver);
@@ -8216,7 +8224,7 @@ gui(void)
 
 	// Copy/Paste (not in water edit mode)
 	if(allowEditorShortcuts && !WaterLevel::gWaterEditMode){
-		if(CPad::IsCtrlDown() && CPad::IsKeyJustDown('C')){
+		if(CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('C')){
 			finishTransformPanelEdit();
 			int before = 0;
 			for(CPtrNode *p = selection.first; p; p = p->next) before++;
@@ -8256,11 +8264,14 @@ gui(void)
 		gOpenImportPrefab = true;
 	}
 
+	// SA-MP: Ctrl+Shift+S/L/P/C/O (samp.cpp)
+	SampShortcuts(allowEditorShortcuts);
+
 	// Gizmo mode shortcuts (not in water edit mode — water gizmo is always translate)
 	if(allowEditorShortcuts && !WaterLevel::gWaterEditMode){
 		if(CPad::IsKeyJustDown('W')) gGizmoMode = GIZMO_TRANSLATE;
 		if(CPad::IsKeyJustDown('Q')) gGizmoMode = GIZMO_ROTATE;
-		if(allowEditorShortcuts && selection.first && CPad::IsKeyJustDown('L'))
+		if(allowEditorShortcuts && selection.first && !CPad::IsCtrlDown() && CPad::IsKeyJustDown('L'))
 			gGizmoSpace = gGizmoSpace == GIZMO_LOCAL ? GIZMO_WORLD : GIZMO_LOCAL;
 	}
 
@@ -8310,11 +8321,11 @@ gui(void)
 	}
 
 	// Ctrl+O to open an IPL map
-	if(allowEditorShortcuts && CPad::IsCtrlDown() && CPad::IsKeyJustDown('O'))
+	if(allowEditorShortcuts && CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('O'))
 		openIplMapDialog();
 
 	// Ctrl+S to save
-	if(allowEditorShortcuts && CPad::IsCtrlDown() && CPad::IsKeyJustDown('S')){
+	if(allowEditorShortcuts && CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('S')){
 		if(WaterLevel::gWaterEditMode && !IsIplMapDocumentOpen()){
 			if(WaterLevel::gWaterDirty){
 				if(WaterLevel::SaveWater())

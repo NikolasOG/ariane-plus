@@ -5,9 +5,10 @@
 //  - deleting (or moving) a stock building becomes RemoveBuildingForPlayer on export
 //  - import CreateObject / CreateDynamicObject / RemoveBuildingForPlayer code
 //    (.pwn / .inc / .txt) and MTA:SA .map files
-//  - export Pawn (custom Map_* helpers, streamer or native objects)
-//  - "Sync to server" writes scriptfiles/ariane_live.txt, which the custom
-//    gamemode polls and rebuilds live
+//  - export Pawn: streamer (CreateDynamicObject), native open.mp / SA-MP
+//    (CreateObject) or your own wrapper functions (<prefix>CreateObject...)
+//  - "Sync to server" writes scriptfiles/ariane_live.txt, which a gamemode or
+//    filterscript polls and rebuilds live (see tools/samp/ariane_live.pwn)
 //
 // SA-MP object rotation is GTA's CMatrix::SetRotate(x, y, z) order:
 //   M = Rz(rz) * Rx(rx) * Ry(ry), columns = right, forward, up.
@@ -32,8 +33,11 @@ static GameFile *gSampFile;
 static int gSampIplCounter;
 static char gSampServerDir[1024];
 static char gSampMapName[64] = "ariane_map";
-static int gSampExportFormat;		// 0 custom, 1 streamer, 2 native
-static bool gSampAutoInc = true;	// also write gamemodes/wasteland/maps/<name>.inc on sync
+enum { SAMP_FORMAT_WRAPPER, SAMP_FORMAT_STREAMER, SAMP_FORMAT_NATIVE };
+static int gSampExportFormat = SAMP_FORMAT_STREAMER;
+static char gSampWrapPrefix[24] = "Map_";	// wrapper format: <prefix>CreateObject / RemoveBuilding / SetObjectMaterial
+static bool gSampAutoInc = true;	// also write <server>/<incdir>/<name>.inc on sync
+static char gSampIncDir[256] = "gamemodes/maps";
 static int gRotMode = -1;		// how a matrix quaternion maps onto ObjectInst::m_rotation
 static bool gSettingsLoaded;
 static bool gOpenExport, gOpenServer;
@@ -1224,69 +1228,154 @@ SanitizeName(char *s)
 		if(!(isalnum((unsigned char)*s) || *s == '_')) *s = '_';
 }
 
+static const char *gFormatNames[] = {
+	"Wrapper functions (<prefix>CreateObject ... - defined in your script)",
+	"Streamer plugin (CreateDynamicObject)",
+	"Native open.mp / SA-MP (CreateObject)",
+};
+
+// One object (plus its material calls) in the chosen API; `assign` stores the id
+// in tmpobjid when material calls follow (Texture Studio style).
+static void
+PawnObjectLines(std::string &out, const SampRawObject &o, int format, const char *indent)
+{
+	char b[512];
+	const char *assign = o.mats.empty() ? "" : "tmpobjid = ";
+	const char *pre = gSampWrapPrefix;
+	if(format == SAMP_FORMAT_WRAPPER)
+		snprintf(b, sizeof(b), "%s%s%sCreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
+			indent, assign, pre, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior);
+	else if(format == SAMP_FORMAT_STREAMER)
+		snprintf(b, sizeof(b), "%s%sCreateDynamicObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
+			indent, assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior < 0 ? -1 : o.interior);
+	else
+		snprintf(b, sizeof(b), "%s%sCreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, 300.0);\n",
+			indent, assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz);
+	out += b;
+	std::string setMat = format == SAMP_FORMAT_WRAPPER ? std::string(pre) + "SetObjectMaterial" :
+	                     format == SAMP_FORMAT_STREAMER ? "SetDynamicObjectMaterial" : "SetObjectMaterial";
+	for(const SampMaterial &m : o.mats){
+		std::string line;
+		if(!m.text){
+			snprintf(b, sizeof(b), "(tmpobjid, %d, %d, ", m.index, m.model);
+			line = setMat + b + PawnString(m.txd) + ", " + PawnString(m.tex);
+			snprintf(b, sizeof(b), ", 0x%08X);", m.color);
+			line += b;
+		}else if(format == SAMP_FORMAT_NATIVE){
+			snprintf(b, sizeof(b), ", %d, %d, ", m.index, m.size);
+			line = "SetObjectMaterialText(tmpobjid, " + PawnString(m.str) + b + PawnString(m.font);
+			snprintf(b, sizeof(b), ", %d, %d, 0x%08X, 0x%08X, %d);", m.fontSize, m.bold, m.fontColor, m.backColor, m.align);
+			line += b;
+		}else{
+			snprintf(b, sizeof(b), "Text(tmpobjid, %d, ", m.index);
+			line = setMat + b + PawnString(m.str);
+			snprintf(b, sizeof(b), ", %d, ", m.size);
+			line += b + PawnString(m.font);
+			snprintf(b, sizeof(b), ", %d, %d, 0x%08X, 0x%08X, %d);", m.fontSize, m.bold, m.fontColor, m.backColor, m.align);
+			line += b;
+		}
+		out += indent + line + "\n";
+	}
+}
+
+static void
+PawnRemovalLine(std::string &out, const SampRawRemoval &r, int format, const char *indent)
+{
+	char b[256];
+	if(format == SAMP_FORMAT_WRAPPER)
+		snprintf(b, sizeof(b), "%s%sRemoveBuilding(%d, %.4f, %.4f, %.4f, %.2f);\n", indent, gSampWrapPrefix,
+			r.model, r.x, r.y, r.z, r.radius);
+	else
+		snprintf(b, sizeof(b), "%sRemoveBuildingForPlayer(playerid, %d, %.4f, %.4f, %.4f, %.2f);\n", indent,
+			r.model, r.x, r.y, r.z, r.radius);
+	out += b;
+}
+
+static std::string
+PawnText(const char *mapName, int format, const ExportLists &l)
+{
+	char name[64], b[512];
+	strncpy(name, mapName, sizeof(name));
+	name[sizeof(name)-1] = '\0';
+	SanitizeName(name);
+	std::string out;
+	snprintf(b, sizeof(b), "// Exported by Ariane (SA-MP edition): map '%s' - %d objects, %d removed buildings\n"
+		"// Format: %s\n", name, (int)l.objects.size(), (int)l.removals.size(), gFormatNames[format]);
+	out += b;
+	bool anyMats = false;
+	for(const SampRawObject &o : l.objects)
+		if(!o.mats.empty()) anyMats = true;
+	if(format == SAMP_FORMAT_WRAPPER){
+		snprintf(b, sizeof(b), "// Needs %sCreateObject, %sRemoveBuilding%s in your script.\nstock CreateMap_%s()\n{\n",
+			gSampWrapPrefix, gSampWrapPrefix, anyMats ? ", ...SetObjectMaterial(Text)" : "", name);
+		out += b;
+		if(anyMats) out += "    new tmpobjid;\n";
+		for(const SampRawRemoval &r : l.removals) PawnRemovalLine(out, r, format, "    ");
+		for(const SampRawObject &o : l.objects) PawnObjectLines(out, o, format, "    ");
+		snprintf(b, sizeof(b), "    return %d;\n}\n", (int)l.objects.size());
+		out += b;
+	}else{
+		snprintf(b, sizeof(b), "// --- objects: call from OnGameModeInit / OnFilterScriptInit\nstock CreateMap_%s()\n{\n", name);
+		out += b;
+		if(anyMats) out += "    new tmpobjid;\n";
+		for(const SampRawObject &o : l.objects) PawnObjectLines(out, o, format, "    ");
+		snprintf(b, sizeof(b), "}\n\n// --- removed buildings: call from OnPlayerConnect\nstock RemoveMap_%s(playerid)\n{\n", name);
+		out += b;
+		if(l.removals.empty()) out += "    #pragma unused playerid\n";
+		for(const SampRawRemoval &r : l.removals) PawnRemovalLine(out, r, format, "    ");
+		out += "}\n";
+	}
+	return out;
+}
+
 static bool
 WritePawn(const char *path, const char *mapName, int format, const ExportLists &l)
 {
 	FILE *f = fopen(path, "w");
 	if(f == nil)
 		return false;
-	char name[64];
-	strncpy(name, mapName, sizeof(name));
-	name[sizeof(name)-1] = '\0';
-	SanitizeName(name);
-	fprintf(f, "// Exported by Ariane (SA-MP edition): map '%s' - %d objects, %d removed buildings\n",
-		name, (int)l.objects.size(), (int)l.removals.size());
-	bool anyMats = false;
-	for(const SampRawObject &o : l.objects)
-		if(!o.mats.empty()) anyMats = true;
-	// material calls in the matching API: Map_* (custom), streamer or native
-	const char *setMat = format == 0 ? "Map_SetObjectMaterial" : format == 1 ? "SetDynamicObjectMaterial" : "SetObjectMaterial";
-	auto writeMats = [&](const SampRawObject &o){
-		for(const SampMaterial &m : o.mats){
-			if(!m.text)
-				fprintf(f, "    %s(tmpobjid, %d, %d, %s, %s, 0x%08X);\n", setMat, m.index, m.model,
-					PawnString(m.txd).c_str(), PawnString(m.tex).c_str(), m.color);
-			else if(format == 2)
-				fprintf(f, "    SetObjectMaterialText(tmpobjid, %s, %d, %d, %s, %d, %d, 0x%08X, 0x%08X, %d);\n",
-					PawnString(m.str).c_str(), m.index, m.size, PawnString(m.font).c_str(), m.fontSize, m.bold,
-					m.fontColor, m.backColor, m.align);
-			else
-				fprintf(f, "    %sText(tmpobjid, %d, %s, %d, %s, %d, %d, 0x%08X, 0x%08X, %d);\n", setMat,
-					m.index, PawnString(m.str).c_str(), m.size, PawnString(m.font).c_str(), m.fontSize, m.bold,
-					m.fontColor, m.backColor, m.align);
-		}
-	};
-	if(format == 0){
-		fprintf(f, "stock Map_%s()\n{\n", name);
-		if(anyMats) fprintf(f, "    new tmpobjid;\n");
-		for(const SampRawRemoval &r : l.removals)
-			fprintf(f, "    Map_RemoveBuilding(%d, %.4f, %.4f, %.4f, %.2f);\n", r.model, r.x, r.y, r.z, r.radius);
-		for(const SampRawObject &o : l.objects){
-			fprintf(f, "    %sMap_CreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
-				o.mats.empty() ? "" : "tmpobjid = ", o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior);
-			writeMats(o);
-		}
-		fprintf(f, "    return %d;\n}\n", (int)l.objects.size());
-	}else{
-		fprintf(f, "// --- objects: call from OnGameModeInit\nstock CreateMap_%s()\n{\n", name);
-		if(anyMats) fprintf(f, "    new tmpobjid;\n");
-		for(const SampRawObject &o : l.objects){
-			const char *assign = o.mats.empty() ? "" : "tmpobjid = ";
-			if(format == 1)
-				fprintf(f, "    %sCreateDynamicObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
-					assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior < 0 ? -1 : o.interior);
-			else
-				fprintf(f, "    %sCreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, 300.0);\n",
-					assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz);
-			writeMats(o);
-		}
-		fprintf(f, "}\n\n// --- removed buildings: call from OnPlayerConnect\nstock RemoveMap_%s(playerid)\n{\n", name);
-		for(const SampRawRemoval &r : l.removals)
-			fprintf(f, "    RemoveBuildingForPlayer(playerid, %d, %.4f, %.4f, %.4f, %.2f);\n", r.model, r.x, r.y, r.z, r.radius);
-		fprintf(f, "}\n");
-	}
+	std::string text = PawnText(mapName, format, l);
+	fwrite(text.data(), 1, text.size(), f);
 	fclose(f);
 	return true;
+}
+
+// Selected objects (layer objects and stock buildings alike) as Pawn lines in
+// the current export format - for pasting into a script.
+int
+SampCopySelectionAsPawn(void)
+{
+	std::string out;
+	int n = 0;
+	bool anyMats = false;
+	for(CPtrNode *p = selection.first; p; p = p->next){
+		ObjectInst *inst = (ObjectInst*)p->item;
+		if(inst == nil || inst->m_isDeleted)
+			continue;
+		inst->UpdateMatrix();
+		SampRawObject o;
+		o.model = SampExportModel(inst->m_objectId);
+		o.x = inst->m_translation.x; o.y = inst->m_translation.y; o.z = inst->m_translation.z;
+		GetMatrixEuler(inst->m_matrix, &o.rx, &o.ry, &o.rz);
+		std::map<ObjectInst*, int>::iterator w = gInstWorld.find(inst);
+		o.world = w == gInstWorld.end() ? -1 : w->second;
+		o.interior = inst->m_area;
+		std::map<ObjectInst*, std::vector<SampMaterial>>::iterator mt = gInstMaterials.find(inst);
+		if(mt != gInstMaterials.end()) o.mats = mt->second;
+		if(!o.mats.empty()) anyMats = true;
+		PawnObjectLines(out, o, gSampExportFormat, "");
+		n++;
+	}
+	if(n == 0){
+		Toast(TOAST_COPY_PASTE, "Select objects first");
+		return 0;
+	}
+	if(anyMats)
+		out = "new tmpobjid;\n" + out;
+	ImGui::SetClipboardText(out.c_str());
+	Toast(TOAST_COPY_PASTE, "Copied %d object(s) as Pawn (%s)", n,
+		gSampExportFormat == SAMP_FORMAT_WRAPPER ? "wrapper" : gSampExportFormat == SAMP_FORMAT_STREAMER ? "streamer" : "native");
+	return n;
 }
 
 // ------------------------------------------------------------------ settings
@@ -1309,6 +1398,8 @@ LoadSettings(void)
 		if(strncmp(line, "server=", 7) == 0) strncpy(gSampServerDir, line + 7, sizeof(gSampServerDir) - 1);
 		else if(strncmp(line, "map=", 4) == 0) strncpy(gSampMapName, line + 4, sizeof(gSampMapName) - 1);
 		else if(strncmp(line, "format=", 7) == 0) gSampExportFormat = atoi(line + 7);
+		else if(strncmp(line, "prefix=", 7) == 0) strncpy(gSampWrapPrefix, line + 7, sizeof(gSampWrapPrefix) - 1);
+		else if(strncmp(line, "incdir=", 7) == 0) strncpy(gSampIncDir, line + 7, sizeof(gSampIncDir) - 1);
 		else if(strncmp(line, "autoinc=", 8) == 0) gSampAutoInc = atoi(line + 8) != 0;
 		else if(strncmp(line, "protect=", 8) == 0) gSampProtectGameFiles = atoi(line + 8) != 0;
 	}
@@ -1326,6 +1417,7 @@ SaveSettings(void)
 		return;
 	fprintf(f, "server=%s\nmap=%s\nformat=%d\nautoinc=%d\nprotect=%d\n",
 		gSampServerDir, gSampMapName, gSampExportFormat, gSampAutoInc ? 1 : 0, gSampProtectGameFiles ? 1 : 0);
+	fprintf(f, "prefix=%s\nincdir=%s\n", gSampWrapPrefix, gSampIncDir);
 	fclose(f);
 }
 
@@ -1468,13 +1560,41 @@ DoSyncToServer(bool force)
 		strncpy(name, gSampMapName, sizeof(name));
 		name[sizeof(name)-1] = '\0';
 		SanitizeName(name);
-		snprintf(file, sizeof(file), "gamemodes/wasteland/maps/%s.inc", name);
+		snprintf(file, sizeof(file), "%s/%s.inc", gSampIncDir, name);
 		JoinPath(inc, sizeof(inc), gSampServerDir, file);
-		WritePawn(inc, name, 0, l);
+		WritePawn(inc, name, gSampExportFormat, l);
 	}
 	Toast(TOAST_SAVE, "Synced %d objects, %d removals to the server%s", (int)l.objects.size(), (int)l.removals.size(),
 		l.moved ? " (moved buildings exported as remove + copy)" : "");
 	return true;
+}
+
+// Agent bridge: Export Pawn to a file. format: 0 wrapper, 1 streamer, 2 native, -1 = current setting.
+bool
+SampAgentExport(const char *path, int format, const char *mapName, const char *prefix, int *objects, int *removals,
+	char *message, size_t messageSize)
+{
+	LoadSettings();
+	if(format < 0) format = gSampExportFormat;
+	if(format > SAMP_FORMAT_NATIVE){
+		snprintf(message, messageSize, "format must be 0 (wrapper), 1 (streamer) or 2 (native)");
+		return false;
+	}
+	char savedPrefix[sizeof(gSampWrapPrefix)];
+	strcpy(savedPrefix, gSampWrapPrefix);
+	if(prefix && prefix[0]){
+		strncpy(gSampWrapPrefix, prefix, sizeof(gSampWrapPrefix) - 1);
+		gSampWrapPrefix[sizeof(gSampWrapPrefix) - 1] = '\0';
+	}
+	ExportLists l;
+	CollectExport(&l);
+	*objects = (int)l.objects.size();
+	*removals = (int)l.removals.size();
+	bool ok = WritePawn(path, mapName && mapName[0] ? mapName : gSampMapName, format, l);
+	strcpy(gSampWrapPrefix, savedPrefix);
+	snprintf(message, messageSize, ok ? "exported %s format to %s" : "can't write %s format to %s",
+		format == SAMP_FORMAT_WRAPPER ? "wrapper" : format == SAMP_FORMAT_STREAMER ? "streamer" : "native", path);
+	return ok;
 }
 
 // Agent bridge entry point: sync without UI popups; returns false + message on refusal
@@ -1551,6 +1671,39 @@ ClearLayer(void)
 	gInstMaterials.clear();
 }
 
+#ifdef _WIN32
+static void
+SampImportDialog(void)
+{
+	char path[1024] = "";
+	if(FileDialog(false, path, sizeof(path), "Maps (*.pwn;*.inc;*.txt;*.map)\0*.pwn;*.inc;*.txt;*.map;*.p\0All files\0*.*\0", nil))
+		SampImportFile(path);
+}
+#endif
+
+static void
+SampRequestReload(void)
+{
+	int removed = 0, objects = CountLayer(&removed);
+	if(objects > 0 || removed > 0) gOpenConfirmReload = true;
+	else SampLoadFromServer();
+}
+
+// SA-MP keyboard shortcuts (also listed under "SA-MP" in Window > Keyboard Shortcuts)
+void
+SampShortcuts(bool allowEditorShortcuts)
+{
+	if(!allowEditorShortcuts || !CPad::IsCtrlDown() || !CPad::IsShiftDown())
+		return;
+	if(CPad::IsKeyJustDown('S')) SampSyncToServer();
+	if(CPad::IsKeyJustDown('L')) SampRequestReload();
+	if(CPad::IsKeyJustDown('P')) gOpenExport = true;
+	if(CPad::IsKeyJustDown('C')) SampCopySelectionAsPawn();
+#ifdef _WIN32
+	if(CPad::IsKeyJustDown('O')) SampImportDialog();
+#endif
+}
+
 void
 SampMenu(void)
 {
@@ -1587,18 +1740,17 @@ SampMenu(void)
 		                  "Turning it off and saving would write layer deletions into the game files.");
 	ImGui::Separator();
 #ifdef _WIN32
-	if(ImGui::MenuItem("Import SA-MP / MTA map...")){
-		char path[1024] = "";
-		if(FileDialog(false, path, sizeof(path), "Maps (*.pwn;*.inc;*.txt;*.map)\0*.pwn;*.inc;*.txt;*.map;*.p\0All files\0*.*\0", nil))
-			SampImportFile(path);
-	}
+	if(ImGui::MenuItem("Import SA-MP / MTA map...", "Ctrl+Shift+O"))
+		SampImportDialog();
 #endif
-	if(ImGui::MenuItem("Export Pawn...")) gOpenExport = true;
-	if(ImGui::MenuItem("Sync to server", nil, false, true)) SampSyncToServer();
-	if(ImGui::MenuItem("Reload from server")){
-		if(objects > 0 || removed > 0) gOpenConfirmReload = true;
-		else SampLoadFromServer();
-	}
+	if(ImGui::MenuItem("Export Pawn...", "Ctrl+Shift+P")) gOpenExport = true;
+	if(ImGui::MenuItem("Copy selection as Pawn", "Ctrl+Shift+C", false, selection.first != nil)) SampCopySelectionAsPawn();
+	if(ImGui::IsItemHovered())
+		ImGui::SetTooltip("Copies the selected objects as Pawn code in the export format (%s).",
+		                  gSampExportFormat == SAMP_FORMAT_WRAPPER ? "wrapper" : gSampExportFormat == SAMP_FORMAT_STREAMER ? "streamer" : "native");
+	ImGui::Separator();
+	if(ImGui::MenuItem("Sync to server", "Ctrl+Shift+S")) SampSyncToServer();
+	if(ImGui::MenuItem("Reload from server", "Ctrl+Shift+L")) SampRequestReload();
 	if(ImGui::IsItemHovered())
 		ImGui::SetTooltip("Replace the SA-MP layer with what the server is running now\n(scriptfiles/ariane_live.txt from the last sync).");
 	if(ImGui::MenuItem("Server folder...")) gOpenServer = true;
@@ -1648,8 +1800,14 @@ SampPopups(void)
 
 	if(ImGui::BeginPopupModal("SA-MP export", nil, ImGuiWindowFlags_AlwaysAutoResize)){
 		ImGui::InputText("Map name", gSampMapName, sizeof(gSampMapName));
-		const char *formats[] = { "custom (Map_CreateObject / Map_RemoveBuilding)", "Streamer (CreateDynamicObject)", "Native (CreateObject)" };
-		ImGui::Combo("Format", &gSampExportFormat, formats, 3);
+		ImGui::Combo("Format", &gSampExportFormat, gFormatNames, 3);
+		if(gSampExportFormat == SAMP_FORMAT_WRAPPER){
+			ImGui::InputText("Function prefix", gSampWrapPrefix, sizeof(gSampWrapPrefix));
+			ImGui::TextDisabled("Writes %sCreateObject(model, x, y, z, rx, ry, rz, world, interior),\n"
+			                    "%sRemoveBuilding(model, x, y, z, radius), %sSetObjectMaterial(...) - define them in your script.",
+			                    gSampWrapPrefix, gSampWrapPrefix, gSampWrapPrefix);
+		}else if(gSampExportFormat == SAMP_FORMAT_NATIVE)
+			ImGui::TextDisabled("open.mp and SA-MP share these natives (CreateObject, SetObjectMaterial, RemoveBuildingForPlayer).");
 		if(ImGui::Button("Save as...", ImVec2(140, 0))){
 			char path[1024];
 			snprintf(path, sizeof(path), "%s.inc", gSampMapName);
@@ -1679,7 +1837,12 @@ SampPopups(void)
 		ImGui::Text("open.mp server folder (the one with omp-server.exe and scriptfiles/)");
 		ImGui::InputText("##server", gSampServerDir, sizeof(gSampServerDir));
 		ImGui::InputText("Map name", gSampMapName, sizeof(gSampMapName));
-		ImGui::Checkbox("Also write gamemodes/wasteland/maps/<name>.inc on sync", &gSampAutoInc);
+		ImGui::Checkbox("Also write a Pawn include on sync", &gSampAutoInc);
+		if(gSampAutoInc){
+			ImGui::InputText("Include folder (in the server folder)", gSampIncDir, sizeof(gSampIncDir));
+			ImGui::Combo("Include format", &gSampExportFormat, gFormatNames, 3);
+			ImGui::TextDisabled("Writes <server>/%s/%s.inc", gSampIncDir, gSampMapName);
+		}
 		if(ImGui::Button("Save", ImVec2(120, 0))){
 			SaveSettings();
 			ImGui::CloseCurrentPopup();
