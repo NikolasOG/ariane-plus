@@ -3924,6 +3924,10 @@ uiMainmenu(void)
 				if(ImGui::MenuItem(ICON_FA_CODE_COMPARE " Changes", "F", showDiffWindow)) { showDiffWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_CUBE " Mapping Styles", "Ctrl+Shift+M", gShowStylesWindow)) { gShowStylesWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_LIST " Log ", nil, showLogWindow)) { showLogWindow ^= 1; }
+				if(ImGui::MenuItem(ICON_FA_CUBE " Model Viewer", "P", ModelViewerIsOpen())){
+					if(GetSpawnObjectId() >= 0) ModelViewerOpen(GetSpawnObjectId(), nil);
+					else Toast(TOAST_SPAWN, "Select a model in the Object Browser first");
+				}
 				if(ImGui::MenuItem(ICON_FA_LIST " Keyboard Shortcuts", nil, showShortcutsWindow)) { showShortcutsWindow ^= 1; }
 				if(ImGui::MenuItem(ICON_FA_CIRCLE_QUESTION " Help", nil, showHelpWindow)) { showHelpWindow ^= 1; }
 				ImGui::Separator();
@@ -4726,6 +4730,16 @@ uiKeyboardShortcutsWindow(void)
 		{ "Water", "Shift+click while creating", "Keep creating after placing water polygon", "Water create mode" },
 		{ "Water", "Ctrl+D", "Duplicate selected water polygons", "Water edit mode" },
 		{ "Water", "RMB / Esc", "Cancel water creation or exit water edit mode", "Water edit mode" },
+
+		{ "Model Viewer", "P", "Open the selected object's model (or the Object Browser's) in the Model Viewer", "Global" },
+		{ "Model Viewer", "Double-click preview", "Open the Object Browser's model in the Model Viewer", "Object Browser" },
+		{ "Model Viewer", "LMB drag", "Orbit around the model", "Model Viewer" },
+		{ "Model Viewer", "RMB / MMB drag", "Pan", "Model Viewer" },
+		{ "Model Viewer", "Mouse wheel", "Zoom", "Model Viewer" },
+		{ "Model Viewer", "F / double-click", "Frame the model", "Model Viewer" },
+		{ "Model Viewer", "1 / 3 / 7", "Front / side / top view", "Model Viewer" },
+		{ "Model Viewer", "Left / Right", "Previous / next model id", "Model Viewer" },
+		{ "Model Viewer", "Click a texture", "Show it large", "Model Viewer" },
 
 		{ "SA-MP", "Ctrl+Shift+S", "Sync the SA-MP layer to the server (scriptfiles/ariane_live.txt)", "Global" },
 		{ "SA-MP", "Ctrl+Shift+L", "Reload the layer from the server (asks first if the layer has edits)", "Global" },
@@ -7324,6 +7338,12 @@ uiInstWindow(void)
 					Toast(TOAST_SAVE, "Failed to export TXD(s)");
 			}
 		}
+		ImGui::SameLine();
+		if(ImGui::Button(ICON_FA_EYE " Preview model")){
+			ObjectInst *first = (ObjectInst*)selection.first->item;
+			ModelViewerOpen(first->m_objectId, first);
+		}
+		ImGui::SetItemTooltip("Open the selected object's model in the Model Viewer (P)");
 		if(haveExportDir)
 			ImGui::TextDisabled("%s", exportDir);
 		ImGui::Separator();
@@ -7758,6 +7778,11 @@ uiBrowserSelectedObject(int selId)
 
 	// Preview (rendered in Draw() before main camera)
 	uiCenteredSquarePreview(gPreviewTexture, 13.0f);
+	if(ImGui::IsItemHovered()){
+		ImGui::SetTooltip("Double-click (or P) to open the Model Viewer");
+		if(ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+			ModelViewerOpen(selId, nil);
+	}
 
 	ImGui::TextColored(ImVec4(0,1,0,1), "ID: %d", sel->m_id);
 	InputTextReadonly<MODELNAMELEN>("Model##BrowserSelected", sel->m_name);
@@ -7784,6 +7809,10 @@ uiBrowserSelectedObject(int selId)
 			gPlaceMode = true;
 		}
 	}
+	ImGui::SameLine();
+	if(ImGui::Button(ICON_FA_EYE " Preview"))
+		ModelViewerOpen(selId, nil);
+	ImGui::SetItemTooltip("Model Viewer: orbit around the model, see its collision, materials and textures (P)");
 	ImGui::SameLine();
 	if(gBrushMode){
 		if(ImGui::Button("Exit Brush"))
@@ -8271,6 +8300,15 @@ gui(void)
 
 	// SA-MP: Ctrl+Shift+S/L/P/C/O (samp.cpp)
 	SampShortcuts(allowEditorShortcuts);
+
+	// P: Model Viewer for the selected object, else the Object Browser's model
+	if(allowEditorShortcuts && !CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('P')){
+		if(selection.first){
+			ObjectInst *first = (ObjectInst*)selection.first->item;
+			ModelViewerOpen(first->m_objectId, first);
+		}else if(GetSpawnObjectId() >= 0)
+			ModelViewerOpen(GetSpawnObjectId(), nil);
+	}
 	StylesShortcuts(allowEditorShortcuts);	// Ctrl+Shift+M (styles.cpp)
 
 	// Gizmo mode shortcuts (not in water edit mode — water gizmo is always translate)
@@ -8395,6 +8433,7 @@ gui(void)
 	}
 	if(!CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('I')) showInstanceWindow ^= 1;
 	if(showInstanceWindow) uiInstWindow();
+	ModelViewerWindow();
 
 	if(!CPad::IsCtrlDown() && !CPad::IsShiftDown() && CPad::IsKeyJustDown('E')) showEditorWindow ^= 1;
 	if(showEditorWindow) uiEditorWindow();

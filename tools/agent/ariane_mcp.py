@@ -1237,6 +1237,29 @@ def block_column(x: float, y: float, z: float, radius: float, height: float, sid
 	                               texture=_tex(texture), color=color)
 
 
+# ---------------------------------------------------------------- model viewer
+@mcp.tool(structured_output=False)
+def model_view(model: int | str, out_path: str, yaw: float = 45.0, pitch: float = 20.0, zoom: float = 1.0,
+               width: int = 1024, height: int = 768, clay: bool = False, wire: bool = False, collision: bool = False,
+               bounds: bool = False, grid: bool = True, axes: bool = False, human: bool = False) -> list:
+	"""Close-up of one model from any angle (the editor's Model Viewer): yaw degrees around it (0 = from +X),
+	pitch degrees above the horizon (90 = top), zoom < 1 closer. clay = untextured shape; collision = collision
+	mesh/boxes/spheres; bounds = drawn bounding box; human = 1.8 m figure for scale. Use it to check open sides,
+	what a model really looks like, or whether its collision matches before placing it."""
+	flags = (1 if clay else 0) | (2 if wire else 0) | (4 if collision else 0) | (8 if bounds else 0) | \
+	        (16 if grid else 0) | (32 if axes else 0) | (64 if human else 0)
+	path = str(Path(out_path).resolve())
+	result = service.client.command("model_view", model, path, width, height, yaw, pitch, zoom, flags)
+	return [result, Image(path=path)]
+
+
+@mcp.tool()
+def viewer_open(model: int | str) -> dict:
+	"""Open the editor's Model Viewer window on a model so the user can orbit around it and inspect its
+	materials, textures and collision."""
+	return service.client.command("viewer_open", model)
+
+
 # ---------------------------------------------------------------- server
 @mcp.tool()
 def samp_export(out_path: str, format: Literal["streamer", "native", "wrapper", "current"] = "current",

@@ -1027,7 +1027,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"samp_export\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"custom_models\",\"reload_custom_models\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"samp_export\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"model_view\",\"viewer_open\",\"custom_models\",\"reload_custom_models\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -2096,6 +2096,36 @@ handleRequest(const std::vector<std::string> &lines)
 		std::string body = SampCustomModelsJson();
 		if(loaded >= 0) body += ",\"loaded\":" + std::to_string(loaded);
 		writeResponse(requestId, true, body);
+		return;
+	}
+	if(command == "viewer_open"){
+		// model - open the Model Viewer window on a model (to show it to the user)
+		int objectId;
+		ObjectDef *object = lines.size() > 2 ? resolveObject(lines[2], &objectId) : nil;
+		if(object == nil){ writeError(requestId, "viewer_open requires a model"); return; }
+		ModelViewerOpen(objectId, nil);
+		writeResponse(requestId, true, "\"model\":" + std::to_string(objectId));
+		return;
+	}
+	if(command == "model_view"){
+		// model path [width height yaw pitch zoom flags] - Model Viewer render to PNG
+		// flags: 1 clay, 2 wire, 4 collision, 8 bounds, 16 grid, 32 axes, 64 human
+		int objectId, w = 1024, h = 768, flags = 16;
+		float yaw = 45.0f, pitch = 20.0f, zoom = 1.0f;
+		ObjectDef *object = lines.size() > 3 ? resolveObject(lines[2], &objectId) : nil;
+		if(object == nil){ writeError(requestId, "model_view requires a model and an output path"); return; }
+		if(lines.size() > 4) parseInt(lines[4], &w);
+		if(lines.size() > 5) parseInt(lines[5], &h);
+		if(lines.size() > 6) parseFloat(lines[6], &yaw);
+		if(lines.size() > 7) parseFloat(lines[7], &pitch);
+		if(lines.size() > 8) parseFloat(lines[8], &zoom);
+		if(lines.size() > 9) parseInt(lines[9], &flags);
+		char error[256] = "";
+		if(!ModelViewerCapture(objectId, lines[3].c_str(), w, h, yaw, pitch, zoom, flags, error, sizeof(error))){
+			writeError(requestId, error[0] ? error : "model_view failed"); return;
+		}
+		writeResponse(requestId, true, "\"model\":" + std::to_string(objectId) + ",\"path\":\"" +
+			jsonEscape(lines[3].c_str()) + "\"");
 		return;
 	}
 	if(command == "model_materials"){

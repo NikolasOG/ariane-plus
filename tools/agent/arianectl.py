@@ -282,6 +282,16 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	ssync = sub.add_parser("samp-sync", help="SA-MP > Sync to server (writes scriptfiles/ariane_live.txt)")
 	ssync.add_argument("--map", help="map name (also the name of the include written on sync, if enabled)")
 	ssync.add_argument("--force", action="store_true", help="allow syncing an empty layer")
+	vopen = sub.add_parser("viewer-open", help="Open the Model Viewer window on a model (show it to the user)")
+	vopen.add_argument("model")
+	mview = sub.add_parser("model-view", help="Model Viewer render of one model to PNG (any angle, clay, collision...)")
+	mview.add_argument("model"); mview.add_argument("--out", type=Path, required=True)
+	mview.add_argument("--size", type=int, nargs=2, default=[1024, 768], metavar=("W", "H"))
+	mview.add_argument("--yaw", type=float, default=45.0, help="degrees around the model (0 = from +X)")
+	mview.add_argument("--pitch", type=float, default=20.0, help="degrees above the horizon (90 = top)")
+	mview.add_argument("--zoom", type=float, default=1.0, help="<1 closer, >1 farther than the framed view")
+	for flag in ("clay", "wire", "collision", "bounds", "no-grid", "axes", "human"):
+		mview.add_argument("--" + flag, action="store_true")
 	sexp = sub.add_parser("samp-export", help="SA-MP > Export Pawn to a file (streamer, native open.mp / SA-MP, wrapper)")
 	sexp.add_argument("--out", type=Path, required=True)
 	sexp.add_argument("--format", choices=("streamer", "native", "wrapper", "current"), default="current")
@@ -729,6 +739,14 @@ def main(argv: list[str] | None = None) -> int:
 			else:
 				payload = prefabs.place_prefab(service, prefabs.load_prefab(service, args.name), args.x, args.y,
 				                               args.heading, snap=not args.no_snap, base_z=args.base_z)
+		elif args.command == "viewer-open":
+			payload = ArianeClient(args.socket, args.timeout).command("viewer_open", args.model)
+		elif args.command == "model-view":
+			flags = (1 if args.clay else 0) | (2 if args.wire else 0) | (4 if args.collision else 0) | \
+			        (8 if args.bounds else 0) | (0 if args.no_grid else 16) | (32 if args.axes else 0) | (64 if args.human else 0)
+			payload = ArianeClient(args.socket, args.timeout).command("model_view", args.model, str(args.out.resolve()),
+			                                                          args.size[0], args.size[1], args.yaw, args.pitch,
+			                                                          args.zoom, flags)
 		elif args.command == "samp-export":
 			fmt = {"wrapper": 0, "streamer": 1, "native": 2, "current": -1}[args.format]
 			payload = ArianeClient(args.socket, args.timeout).command("samp_export", str(args.out.resolve()), fmt,

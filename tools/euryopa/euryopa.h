@@ -574,6 +574,13 @@ int SampLoadFromServer(void);
 void SampMenu(void);
 void SampPopups(void);
 void SampShortcuts(bool allowEditorShortcuts);
+// Model Viewer (modelviewer.cpp)
+void ModelViewerOpen(int modelId, ObjectInst *inst);
+bool ModelViewerIsOpen(void);
+void ModelViewerRender(void);
+void ModelViewerWindow(void);
+bool ModelViewerCapture(int modelId, const char *path, int w, int h, float yawDeg, float pitchDeg, float zoom,
+	int flags, char *error, size_t errorSize);
 int SampCopySelectionAsPawn(void);
 void SampLoadDefinitions(void);
 bool SampModelsLoaded(void);

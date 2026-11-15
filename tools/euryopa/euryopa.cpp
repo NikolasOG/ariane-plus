@@ -2813,6 +2813,7 @@ Draw(void)
 		RenderPreviewObject(GetSpawnObjectId());
 	RenderRequestedObjectThumbnails();
 	RenderRequestedPrefabThumbnails();
+	ModelViewerRender();
 	rw::SetRenderState(rw::GSALPHATEST, previewGsAlphaTest);
 
 	Scene.camera->beginUpdate();

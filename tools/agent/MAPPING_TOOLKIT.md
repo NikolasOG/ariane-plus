@@ -97,6 +97,8 @@ On the CLI, options go **before** `--` and negative coordinates after it:
 | `material set/preset/text/clear/get/copy/model/txd/presets` | `material_*`, `model_materials`, `txd_textures`, `texture_presets` | retexturing |
 | `custom-models list/reload/add` | `custom_models_list/reload`, `custom_model_add` | AddSimpleModel models |
 | `samp-sync` | `samp_sync` | push to the server |
+| `model-view MODEL --out x.png [--yaw --pitch --zoom --clay --collision --bounds --human]` | `model_view` | close-up of one model from any angle (returns the image) |
+| `viewer-open MODEL` | `viewer_open` | open the editor's Model Viewer on a model for the user |
 | `samp-export --format streamer\|native\|wrapper` | `samp_export` | Pawn include file (open.mp and SA-MP share the native API) |
 | `blocks list/place/box/panel/room/beam/pole/ramp/roof/column` | `blocks_list`, `block_*` | building blocks: exact-size shapes to compose custom objects |
 | `prefab save --rigid` | `prefab_save(rigid=True)` | keep a composed object's exact 3D layout |

@@ -40,6 +40,25 @@ SA-MP / open.mp server without ever touching your game's IPL files.
   (streamer plugin required).
 - All SA-MP shortcuts are listed under **SA-MP** in Window > Keyboard Shortcuts.
 
+## Model Viewer
+Object Browser > **Preview** (or double-click the small preview, or press **P** with an object
+selected; also Window > Model Viewer and Object Info > Preview model) opens an orbitable close-up of
+the model:
+- left-drag orbits, right/middle-drag pans, the wheel zooms, double-click or F frames the model,
+  1 / 3 / 7 give front / side / top views, Left / Right step through model ids;
+- textured or untextured ("clay") shading, wireframe, and overlays for collision (boxes, spheres,
+  mesh), the drawn bounding box, a 1 m ground grid, the pivot axes and a 1.8 m person for scale;
+- background, light and field-of-view controls; LOD / damage variants; the SA-MP material
+  overrides of the selected object;
+- an inspector: model facts (TXD, defining IDE, draw distance, LOD, flags, drawn vs collision size -
+  it warns when the mesh floats above its collision - triangle / vertex / material counts), material
+  slots with their textures (the SA-MP material index), every texture in the TXD (click to enlarge)
+  and collision stats per surface;
+- Place, Go to nearest instance, Save PNG (to the Ariane data folder's `screenshots`), Copy ID / name.
+
+Agents can render the same view to a PNG (`arianectl model-view`, MCP `model_view`) or open the
+window for you (`viewer-open` / `viewer_open`).
+
 ## Mapping with an AI agent
 Point an agent at [`SKILLS.md`](SKILLS.md) first: preflight checks, the build loop and
 recipes for walls, settlements, ruins, retexturing and custom models. The full reference

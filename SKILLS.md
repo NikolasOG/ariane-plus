@@ -134,6 +134,10 @@ colour. Example to copy: `prefab place watchtower_blocks X Y HEADING`.
 
 ## 4. Habits that save time
 
+* **Look at a model before using it**: `model-view MODEL --out m.png --clay --collision --human`
+  (`model_view`) shows its real shape, scale and collision from any angle - catch open-backed
+  models, mismatched collision and the wrong size before placing dozens.
+
 * **Dry-run first**: `wall-run`, `pack` and `settle` take `--dry-run`. Read the
   counts before committing hundreds of objects.
 * **Batch**: bulk delete (`delete ID ID ...` / `map_delete_many`) and
