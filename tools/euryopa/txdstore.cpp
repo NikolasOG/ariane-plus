@@ -35,6 +35,24 @@ FindTxdSlot(const char *name)
 	return -1;
 }
 
+// texture by name in a txd slot (or its parents), case insensitive
+rw::Texture*
+FindTxdTexture(int slot, const char *name)
+{
+	for(int depth = 0; depth < 8; depth++){
+		TxdDef *td = GetTxdDef(slot);
+		if(td == nil || td->txd == nil)
+			return nil;
+		rw::Texture *t = FindTextureCaseInsensitive(td->txd, name);
+		if(t || td->parentId < 0)
+			return t;
+		slot = td->parentId;
+		if(!IsTxdLoaded(slot))
+			LoadTxd(slot);
+	}
+	return nil;
+}
+
 TxdDef*
 GetTxdDef(int i)
 {

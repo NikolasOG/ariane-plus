@@ -1,0 +1,9 @@
+@echo off
+rem MCP stdio server for Ariane (point an MCP host at this file).
+set "ARIANE_ENGINE_TCP_PORT=48731"
+set /p ARIANE_ENGINE_TOKEN=<"%~dp0agent-data\token.txt"
+set "ARIANE_ASSET_DB=%~dp0agent-data\assets.sqlite3"
+set "ARIANE_AGENT_STATE_DIR=%~dp0agent-data\state"
+set "ARIANE_DISCOVERY_DIR=%~dp0agent-data\discovery"
+set "ARIANE_GAME_DIR=C:\Games\GTA San Andreas"
+"%~dp0.venv-agent\Scripts\ariane-mcp.exe"

@@ -23,19 +23,29 @@ import uuid
 from pathlib import Path
 
 
+BUNDLED_DIR = Path(__file__).resolve().parent / "prefab_library"
+
+
 def prefab_dir(service) -> Path:
 	return Path(service.state_dir) / "prefabs"
 
 
 def list_prefabs(service) -> list[dict]:
-	out = []
-	for path in sorted(prefab_dir(service).glob("*.json")):
-		try:
-			data = json.loads(path.read_text(encoding="utf-8"))
-			out.append({"name": data.get("name", path.stem), "parts": len(data.get("parts", [])),
+	"""Saved prefabs (<state>/prefabs) plus the library bundled with the fork;
+	a saved prefab with the same name wins."""
+	out, seen = [], set()
+	for source, folder in (("saved", prefab_dir(service)), ("bundled", BUNDLED_DIR)):
+		for path in sorted(folder.glob("*.json")):
+			try:
+				data = json.loads(path.read_text(encoding="utf-8"))
+			except ValueError:
+				continue
+			name = data.get("name", path.stem)
+			if name in seen:
+				continue
+			seen.add(name)
+			out.append({"name": name, "parts": len(data.get("parts", [])), "source": source,
 			            "notes": data.get("notes", "")})
-		except ValueError:
-			pass
 	return out
 
 
@@ -43,6 +53,8 @@ def load_prefab(service, name_or_path: str) -> dict:
 	path = Path(name_or_path)
 	if not path.suffix:
 		path = prefab_dir(service) / f"{name_or_path}.json"
+		if not path.exists():
+			path = BUNDLED_DIR / f"{name_or_path}.json"
 	return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -88,6 +100,8 @@ def save_prefab(service, name: str, instance_ids: list[int], origin: tuple[float
 		dx, dy = x - ox, y - oy
 		part = {"model": it["model_id"], "dx": round(dx * c + dy * s, 3), "dy": round(-dx * s + dy * c, 3),
 		        "heading": round((it["rotation"][2] - oh) % 360, 2), "on": None}
+		if it.get("materials"):
+			part["materials"] = it["materials"]
 		for j in range(idx):                       # resting on an earlier (lower) part?
 			base = items[j]
 			b = bounds.get(base["model_id"])
@@ -150,6 +164,13 @@ def place_prefab(service, prefab: dict, x: float, y: float, heading: float, *, s
 		for i in level:
 			placed[i] = by_key.get(keys[i])
 		remaining = [i for i in remaining if i not in level]
+	for i, item in placed.items():
+		if item and parts[i].get("materials"):
+			try:
+				from . import materials as _materials
+			except ImportError:
+				import materials as _materials
+			_materials.apply_materials(service, item["instance_id"], parts[i]["materials"])
 	ids = [placed[i]["instance_id"] for i in sorted(placed) if placed[i]]
 	return {"ok": True, "prefab": prefab.get("name"), "placed": len(ids), "instance_ids": ids,
 	        "unplaced_stacked": len(remaining)}

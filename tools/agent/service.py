@@ -1327,6 +1327,12 @@ class ArianeService:
 			placed = self.engine("place", [item["model_id"], *position, rotation[2], 0])
 			if abs(rotation[0]) > 0.001 or abs(rotation[1]) > 0.001:
 				self.engine("transform3d", [placed["instance_id"], *position, *rotation])
+			if item.get("materials"):
+				try:
+					from . import materials as _materials
+				except ImportError:
+					import materials as _materials
+				_materials.apply_materials(self, placed["instance_id"], item["materials"])
 			mapping.append({"object_key": item["object_key"],
 			                "instance_id": placed["instance_id"]})
 			self._stable_keys_by_instance[int(placed["instance_id"])] = item["object_key"]

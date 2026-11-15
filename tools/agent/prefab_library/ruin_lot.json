@@ -1,0 +1,42 @@
+{
+ "name": "ruin_lot",
+ "notes": "debris for a ruined house lot (centre = lot centre); pair with replace-building <house> 3364 (des_ruin3_). rubbled01_SFS is grounded on all sides (rubbled03 is open on one edge); BREAK_WALL_* models read as orange plaster frames - avoid; rubbled01 sunk 0.6 m (edges lift up to 0.59); burnt pickup parked against its -y edge hides the last gap",
+ "parts": [
+  {
+   "model": 10984,
+   "dx": 2.0,
+   "dy": 0.5,
+   "heading": 0,
+   "on": null,
+   "z_sink": 0.6
+  },
+  {
+   "model": 1358,
+   "dx": -8.0,
+   "dy": -7.5,
+   "heading": 15,
+   "on": null
+  },
+  {
+   "model": 2937,
+   "dx": -3.5,
+   "dy": -5.0,
+   "heading": 35,
+   "on": null
+  },
+  {
+   "model": 2937,
+   "dx": -2.6,
+   "dy": -5.6,
+   "heading": 10,
+   "on": null
+  },
+  {
+   "model": 12957,
+   "dx": -3.1,
+   "dy": -10.5,
+   "heading": 98,
+   "on": null
+  }
+ ]
+}

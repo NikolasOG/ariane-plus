@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -40,6 +41,8 @@ mcp = MCPServer(
 	"ariane",
 	description="Inspect GTA assets and safely edit an Ariane scratch layer.",
 	instructions=(
+		"SA-MP mapping: call mapping_toolkit_guide first - it lists the map_*, building_*, prefab_*, material_*, "
+		"custom_model* and samp_sync tools (terrain scans, gap-free walls, packing, settling, lint, retexturing). "
 		"Vibe mapping workflow: read project memory; survey the user camera/selected pixel without moving it. "
 		"Translate the user's language into catalogue roles/styles/avoid while preserving their original brief. "
 		"Read and annotate canonical asset previews before using uncertain fronts/anchors. "
@@ -710,6 +713,371 @@ def compare_mapping_review_images(capture_paths: list[str], output_path: str) ->
 def inspect_placement_anchors(asset_id: int) -> dict:
     """Get measured bounds anchors and separately sourced functional anchors. Use names with place_relative."""
     return service.profiles.anchors(asset_id)
+
+
+# ====================================================================== mapping toolkit
+# SA-MP edition helpers (see MAPPING_TOOLKIT.md - call mapping_toolkit_guide first).
+# Thin wrappers over mapping_tools / ground / lint / prefabs / building_tools /
+# materials / custom_models so the CLI and the connector behave the same.
+
+if __package__:
+	from . import mapping_tools, ground as ground_mod, lint as lint_mod, prefabs as prefab_mod
+	from . import building_tools, materials as material_mod, custom_models as custom_mod
+	from .ariane_ipc import ArianeClient
+	from .asset_index import AssetIndex
+else:
+	import mapping_tools, ground as ground_mod, lint as lint_mod, prefabs as prefab_mod
+	import building_tools, materials as material_mod, custom_models as custom_mod
+	from ariane_ipc import ArianeClient
+	from asset_index import AssetIndex
+
+TOOLKIT_GUIDE = Path(__file__).resolve().parent / "MAPPING_TOOLKIT.md"
+_slow = None
+
+
+def _slow_service():
+	"""Same service with a long bridge timeout (scans, lint, settle over big areas)."""
+	global _slow
+	if _slow is None:
+		_slow = ArianeService(
+			Path(os.environ.get("ARIANE_ENGINE_SOCKET", DEFAULT_ENGINE_SOCKET)),
+			Path(os.environ.get("ARIANE_ASSET_DB", DEFAULT_DATABASE)), 300.0,
+			discovery_dir=Path(os.environ.get("ARIANE_DISCOVERY_DIR", DEFAULT_SESSION_DIR)),
+			state_dir=Path(os.environ.get("ARIANE_AGENT_STATE_DIR", DEFAULT_STATE_DIR)))
+	return _slow
+
+
+def _bbox(bbox: list[float]) -> tuple[float, float, float, float]:
+	if len(bbox) != 4:
+		raise ValueError("bbox is [x0, y0, x1, y1]")
+	x0, y0, x1, y1 = (float(v) for v in bbox)
+	return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+
+
+@mcp.tool()
+def mapping_toolkit_guide() -> str:
+	"""Read first: the SA-MP mapping workflow, every toolkit tool, site files, and hard-won rules (no wall gaps,
+	nothing on tracks/roads, settle after placing, retexturing, custom models)."""
+	return TOOLKIT_GUIDE.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- terrain
+@mcp.tool()
+def map_ground_scan(bbox: list[float], out_path: str, step: float = 1.0, png_path: str | None = None,
+                    layer: Literal["ground", "top"] = "ground", include_agent: bool = False) -> dict:
+	"""Raycast a grid over bbox [x0,y0,x1,y1]: ground height + collision surface per cell (DIRTTRACK, TARMAC,
+	SAND...). Save it once per site; tracks, roads and structures are read from it by pack, facade and lint.
+	'top' layer = first hit including roofs (structure mask). ~1 s per 2,500 cells."""
+	from collections import Counter
+	data = ground_mod.scan(_slow_service().client, _bbox(bbox), step, include_agent=include_agent)
+	ground_mod.save(data, out_path)
+	classes = Counter(ground_mod.class_at(data, i, layer) for i in range(data["nx"] * data["ny"]))
+	result = {"ok": True, "out": out_path, "grid": [data["nx"], data["ny"]], "step": step,
+	          "classes": dict(classes.most_common())}
+	if png_path:
+		ground_mod.render_png(data, png_path, layer)
+		result["png"] = png_path
+	return result
+
+
+@mcp.tool()
+def map_track_query(scan_path: str, points: list[list[float]], surfaces: list[str] | None = None) -> dict:
+	"""Distance to and direction of the nearest track (default DIRTTRACK) for each [x, y]; use it to put gates on
+	tracks, face buildings to the street or keep props off it. surfaces=['TARMAC',...] for roads."""
+	data = ground_mod.load(scan_path)
+	mask = ground_mod.TrackMask(data, tuple(surfaces or ["DIRTTRACK"]))
+	out = []
+	for x, y in points:
+		d = mask.direction(x, y)
+		out.append({"at": [x, y], "on_track": mask.on_track(x, y),
+		            "distance": round(d[0], 2) if d else None,
+		            "direction": [round(d[1], 3), round(d[2], 3)] if d else None,
+		            "nearest": [round(d[3], 2), round(d[4], 2)] if d else None})
+	return {"ok": True, **mask.stats(), "points": out}
+
+
+@mcp.tool(structured_output=False)
+def map_capture_ortho(cx: float, cy: float, half_width: float, out_path: str, cam_z: float = 250.0,
+                      lod_mult: float = 3.0, delay_frames: int = 30) -> list:
+	"""Straight-down orthographic screenshot centred on (cx, cy), half_width metres either side (known scale,
+	no fog). The best way to check layouts, gaps and overlaps by eye. Ariane's window must not be minimised."""
+	result = _slow_service().client.command("capture_ortho", str(Path(out_path).resolve()), cx, cy, half_width,
+	                                        cam_z, lod_mult, delay_frames)
+	return [result, Image(path=str(Path(out_path).resolve()))]
+
+
+@mcp.tool(structured_output=False)
+def map_plan(bbox: list[float], out_path: str, scan_path: str | None = None, issues_path: str | None = None,
+             scale: float = 3.0) -> list:
+	"""Top-down plan PNG: world buildings (grey), trees/poles (green dots), placed objects (blue, small props
+	purple, ground planes outlined), tracks (orange) / roads (dark) from a scan, lint issues (red circles)."""
+	result = mapping_tools.plan_map(_slow_service(), _bbox(bbox), out_path, scan=scan_path, issues=issues_path, scale=scale)
+	return [result, Image(path=out_path)]
+
+
+@mcp.tool()
+def map_world_items(bbox: list[float], name_filter: str | None = None, limit: int = 400) -> dict:
+	"""World (stock map) objects whose origin is inside bbox - buildings, trees, poles, fences - with model,
+	position and heading. Use before removing/replacing buildings or to find free ground."""
+	items = mapping_tools.world_items(_slow_service(), _bbox(bbox))
+	if name_filter:
+		items = [i for i in items if name_filter.lower() in str(i.get("name", "")).lower()]
+	return {"ok": True, "count": len(items), "items": items[:limit], "truncated": len(items) > limit}
+
+
+# ---------------------------------------------------------------- building blocks
+@mcp.tool()
+def map_settle(bbox: list[float] | None = None, models: list[int] | None = None, ids: list[int] | None = None,
+               visual: bool = False, edge_stat: Literal["p25", "max"] = "p25", max_sink: float = 3.0,
+               min_gap: float = 0.05, dry_run: bool = False) -> dict:
+	"""Lower placed objects (with everything stacked on them) until they touch the terrain - run after every
+	batch of placements; snapping alone leaves objects floating on slopes. visual=True grounds the drawn walls of
+	buildings whose mesh sits above their collision (edge_stat 'max' for mounds/heaps/slabs)."""
+	return mapping_tools.settle(_slow_service(), _slow_service().client, bbox=_bbox(bbox) if bbox else None,
+	                            models=models, ids=ids, min_gap=min_gap, dry_run=dry_run, visual=visual,
+	                            max_sink=max_sink, edge_stat=edge_stat)
+
+
+@mcp.tool()
+def map_delete_many(instance_ids: list[int]) -> dict:
+	"""Delete many placed objects in a few round trips."""
+	return mapping_tools.delete_objects(service, instance_ids)
+
+
+@mcp.tool()
+def map_transform_many(rows: list[dict]) -> dict:
+	"""Move many placed objects: rows of {instance_id, x, y, z, heading[, snap]}."""
+	return mapping_tools.transform_objects(service, rows)
+
+
+@mcp.tool()
+def map_wall_run(points: list[list[float]], closed: bool = True, gates: list[dict] | None = None,
+                 containers: list[int] | None = None, container_levels: int = 2, fence: int | None = 19641,
+                 mix: float = 0.65, seed: int = 1, gate_posts: bool = True, dry_run: bool = False) -> dict:
+	"""Build a perimeter wall along a polygon/polyline with no gaps: stacked shipping containers mixed with fence
+	sections laid end to end at their real length; slack is hidden as overlap behind containers; corners closed.
+	gates: [{x, y, opening}] centred ON the wall line (and on a dirt track - check with map_track_query); each
+	gate gets two container posts across the wall. Run with dry_run first; then map_settle and lint."""
+	return mapping_tools.wall_run(service, points, closed=closed, gates=gates,
+	                              containers=tuple(containers or (2932, 2934, 2935)), container_levels=container_levels,
+	                              fence=fence, mix=mix, seed=seed, gate_posts=gate_posts, dry_run=dry_run)
+
+
+@mcp.tool()
+def map_pack(zone: list[list[float]], models: list[int], count: int = 20, weights: list[float] | None = None,
+             gap: float = 1.5, step: float = 2.0, scan_path: str | None = None, align: str = "track", seed: int = 1,
+             dry_run: bool = False) -> dict:
+	"""Fill a polygon zone with up to `count` structures on genuinely free ground: clear of world buildings,
+	trees, placed objects (gap m), dirt tracks and roads (needs scan_path). Sites nearest the tracks first, facing
+	them (align='track'; or 'random' / a heading). Good for shacks, tents, stalls; dense but tidy."""
+	return mapping_tools.pack(_slow_service(), zone, models, count=count, weights=weights, gap=gap, step=step,
+	                          scan=scan_path, align=align, seed=seed, dry_run=dry_run)
+
+
+@mcp.tool()
+def map_lint(site_path: str, max_issues: int = 40, issues_out: str | None = None,
+             fix_ids_out: str | None = None, protect: list[int] | None = None) -> dict:
+	"""Check a site against the mapping rules: wall/perimeter gaps, objects inside each other, clashes with world
+	buildings and tree trunks, objects on dirt tracks or roads, props perched on fences/roofs. Site JSON format is
+	in mapping_toolkit_guide. Fix every issue (or justify it) before syncing."""
+	site_file = Path(site_path)
+	site = json.loads(site_file.read_text(encoding="utf-8"))
+	result = lint_mod.lint(_slow_service(), site, base_dir=site_file.parent)
+	if fix_ids_out:
+		kill, flagged = lint_mod.fix_ids(result, set(protect or []))
+		Path(fix_ids_out).write_text(" ".join(map(str, kill)), encoding="utf-8")
+		result["fix"] = {"delete": len(kill), "file": fix_ids_out, "protected_but_flagged": flagged}
+	result.pop("_internal", None)
+	if issues_out:
+		Path(issues_out).write_text(json.dumps(result["issues"], indent=1), encoding="utf-8")
+	issues = result.pop("issues")
+	return {**result, "issues_total": len(issues), "issues": issues[:max_issues]}
+
+
+# ---------------------------------------------------------------- prefabs
+@mcp.tool()
+def prefab_list() -> dict:
+	"""Saved and bundled prefabs (multi-part structures: gatehouse, ruined lot...)."""
+	return {"ok": True, "prefabs": prefab_mod.list_prefabs(service)}
+
+
+@mcp.tool()
+def prefab_save(name: str, instance_ids: list[int], origin: list[float] | None = None, notes: str = "") -> dict:
+	"""Save placed objects as a reusable prefab (stacking and material overrides are kept). origin [x, y, heading]
+	defaults to the first instance."""
+	return prefab_mod.save_prefab(service, name, instance_ids, tuple(origin) if origin else None, notes)
+
+
+@mcp.tool()
+def prefab_place(name: str, x: float, y: float, heading: float, snap: bool = True, base_z: float | None = None) -> dict:
+	"""Place a prefab; ground parts snap to terrain, stacked parts follow. base_z puts it on a slab/floor
+	(snapping ignores placed objects). Run map_settle afterwards on slopes."""
+	return prefab_mod.place_prefab(service, prefab_mod.load_prefab(service, name), x, y, heading, snap=snap, base_z=base_z)
+
+
+# ---------------------------------------------------------------- world buildings
+@mcp.tool()
+def building_replace(x: float, y: float, model: int, old_model: int | None = None, heading_offset: float = 0.0,
+                     dx: float = 0.0, dy: float = 0.0, dz: float | None = None, keep_old: bool = False,
+                     wire_poles: bool = True) -> dict:
+	"""Swap the world building at (x, y) (plus its LOD) for another model at the same transform - e.g. a house for
+	a ruin. Fills the hole a removed lot leaves with ground planes and, with wire_poles, plants a pole at each
+	power line left hanging over the old footprint. Check the result with map_capture_ortho."""
+	return building_tools.replace_building(service, x, y, model, old_model=old_model, heading_offset=heading_offset,
+	                                       dx=dx, dy=dy, dz=dz, keep_old=keep_old, wire_poles=wire_poles)
+
+
+@mcp.tool()
+def building_facade(x: float, y: float, model: int, side: str = "auto", spacing: float | None = None,
+                    offset: float = 0.3, levels: str = "auto", level_height: float | None = None,
+                    heading_offset: float = 0.0, max_levels: int = 6, scan_path: str | None = None,
+                    building_model: int | None = None, min_run: int = 3, min_levels: int = 2) -> dict:
+	"""Dress a real wall of the world building at (x, y) with `model` (scaffolding bays, boarding...). Probes the
+	actual wall (two heights, rejects galleries/overhangs) instead of the bounding box; side 'auto' faces the road
+	(give scan_path). Skips runs shorter than min_run bays."""
+	mask = None
+	if scan_path:
+		data = ground_mod.load(scan_path)
+		names = [n.upper() for n in data["surface_names"]]
+		mask = ground_mod.TrackMask(data, tuple(n for n in names if ground_mod.surface_class(n) == "road"), min_cells=20)
+	return building_tools.facade(service, x, y, model, side=side, spacing=spacing, offset=offset,
+	                             levels=int(levels) if str(levels).isdigit() else "auto", level_height=level_height,
+	                             heading_offset=heading_offset, max_levels=max_levels, road_mask=mask,
+	                             building_model=building_model, min_run=min_run, min_levels=min_levels)
+
+
+@mcp.tool()
+def building_wire_ends(box: list[float], ground_z: float) -> dict:
+	"""Power-line ends hanging over a rectangle [x0,y0,x1,y1] (e.g. after removing a building): plant a pole
+	(1308) at each."""
+	x0, y0, x1, y1 = _bbox(box)
+	return {"ok": True, "ends": building_tools.wire_ends(service, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], ground_z)}
+
+
+# ---------------------------------------------------------------- assets
+@mcp.tool()
+def asset_open_sides(model: int) -> dict:
+	"""Which sides of a model are not drawn (open-backed rubble, facades): cover them or turn them to a wall."""
+	a = service.probe_asset(model, ensure_renderable=True)
+	areas = a.get("mesh_side_area") or {}
+	opposite = {"+x": "-x", "-x": "+x", "+y": "-y", "-y": "+y"}
+	open_sides = [k for k in opposite if areas and areas[k] < 0.15 * max(areas[opposite[k]], 1.0)]
+	return {"ok": True, "model": model, "name": a.get("name"), "side_area_m2": areas, "open_sides": open_sides}
+
+
+@mcp.tool()
+def asset_size_match(width: float, depth: float, query: str = "", tolerance: float = 0.25, limit: int = 20,
+                     include_hazards: bool = False) -> dict:
+	"""Models with a similar footprint (e.g. a ruin to replace a building of width x depth metres). Explosive
+	models are excluded unless include_hazards."""
+	return {"assets": building_tools.size_match(AssetIndex(Path(os.environ.get("ARIANE_ASSET_DB", DEFAULT_DATABASE))),
+	                                            width, depth, query=query, tolerance=tolerance, limit=limit,
+	                                            include_hazards=include_hazards)}
+
+
+@mcp.tool()
+def asset_mark_hazards(game_dir: str | None = None) -> dict:
+	"""Tag explosive / breakable / dynamic models from data/object.dat in the asset index (search then hides
+	explosive ones). Run once per install."""
+	game = game_dir or os.environ.get("ARIANE_GAME_DIR")
+	if not game:
+		raise ValueError("pass game_dir or set ARIANE_GAME_DIR")
+	return AssetIndex(Path(os.environ.get("ARIANE_ASSET_DB", DEFAULT_DATABASE))).mark_hazards(game)
+
+
+# ---------------------------------------------------------------- SA-MP materials
+@mcp.tool()
+def material_set(instance_id: int, index: int, model: int, txd: str, texture: str, color: str = "0") -> dict:
+	"""SetDynamicObjectMaterial on a placed object: material slot `index` gets `texture` from txd `txd` (model =
+	any model using that txd). color ARGB '0xFF6E5A46' tints (0 keeps); txd/texture 'none' keeps the texture and
+	only recolours. Find slots with model_materials. Drawn in Ariane, exported and synced."""
+	return material_mod.set_material(service, instance_id, index, model, txd, texture, color)
+
+
+@mcp.tool()
+def material_preset(instance_id: int, index: int, preset: str, color: str = "0") -> dict:
+	"""Apply a named wasteland texture preset (rusty_metal, corrugated_metal, barn_wood, burnt_wall, concrete,
+	invisible...; see texture_presets) to one material slot."""
+	return material_mod.set_preset(service, instance_id, index, preset, color)
+
+
+@mcp.tool()
+def material_text(instance_id: int, index: int, text: str, size: int = 90, font: str = "Arial", font_size: int = 24,
+                  bold: bool = True, font_color: str = "0xFFFFFFFF", back_color: str = "0", align: int = 1) -> dict:
+	"""SetDynamicObjectMaterialText: signs, graffiti, notices. size = OBJECT_MATERIAL_SIZE_* (90 = 256x128); align
+	0/1/2 = left/centre/right; newline with '\\n'. Ariane shows the slot as its background colour only."""
+	return material_mod.set_material_text(service, instance_id, index, text, size=size, font=font, font_size=font_size,
+	                                      bold=bold, font_color=font_color, back_color=back_color, align=align)
+
+
+@mcp.tool()
+def material_clear(instance_id: int, index: int = -1) -> dict:
+	"""Remove material overrides (all slots, or one)."""
+	return material_mod.clear_materials(service, instance_id, index)
+
+
+@mcp.tool()
+def material_get(instance_id: int) -> dict:
+	"""Material overrides on a placed object."""
+	return material_mod.get_materials(service, instance_id)
+
+
+@mcp.tool()
+def material_copy(from_id: int, to_ids: list[int]) -> dict:
+	"""Copy every material override from one placed object to others (same model family)."""
+	return {"ok": True, "copied": [material_mod.copy_materials(service, from_id, t)["instance_id"] for t in to_ids]}
+
+
+@mcp.tool()
+def model_materials(model: int) -> dict:
+	"""A model's material slots (index -> current texture + colour), its txd and every texture in that txd."""
+	return material_mod.model_materials(service, model)
+
+
+@mcp.tool()
+def txd_textures(txd: str) -> dict:
+	"""Every texture in a txd (by name) - for picking retexture sources."""
+	return material_mod.txd_textures(service, txd)
+
+
+@mcp.tool()
+def texture_presets(check: bool = False) -> dict:
+	"""Named retexture presets (model, txd, texture); check=True verifies each resolves in this install."""
+	out = {"ok": True, "presets": material_mod.TEXTURE_PRESETS}
+	if check:
+		out["resolves"] = material_mod.check_presets(service)
+	return out
+
+
+# ---------------------------------------------------------------- SA-MP custom models
+@mcp.tool()
+def custom_models_list() -> dict:
+	"""Custom models from <server>/models/artconfig.txt: samp_id (negative, used in game) -> model_id (place this
+	one in Ariane), base model, files, load errors."""
+	return custom_mod.list_custom_models(service)
+
+
+@mcp.tool()
+def custom_models_reload(models_dir: str | None = None) -> dict:
+	"""Re-read artconfig.txt (default <server>/models) after adding files."""
+	return custom_mod.reload_custom_models(service, models_dir)
+
+
+@mcp.tool()
+def custom_model_add(server_dir: str, dff_path: str, txd_path: str, base_id: int, samp_id: int | None = None,
+                     world: int = -1) -> dict:
+	"""Install a custom model: copy dff/txd into <server>/models, append AddSimpleModel to artconfig.txt (next free
+	id from -1000 down unless given) and load it. base_id = stock model whose collision/flags it uses in game."""
+	return custom_mod.add_simple_model(service, server_dir, dff_path, txd_path, base_id=base_id, samp_id=samp_id,
+	                                   world=world)
+
+
+# ---------------------------------------------------------------- server
+@mcp.tool()
+def samp_sync(map_name: str | None = None, force: bool = False) -> dict:
+	"""SA-MP > Sync to server: writes scriptfiles/ariane_live.txt (objects, removals, materials) which the running
+	gamemode reloads within seconds, plus gamemodes/wasteland/maps/<map>.inc. Refuses an empty layer unless force."""
+	return service.client.command("samp_sync", map_name or "-", int(force))
 
 
 def main():

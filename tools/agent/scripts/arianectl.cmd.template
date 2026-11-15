@@ -1,0 +1,7 @@
+@echo off
+rem arianectl wired to the running Ariane (port + token) and the local asset catalogue.
+set "ARIANE_ENGINE_TCP_PORT=48731"
+set /p ARIANE_ENGINE_TOKEN=<"%~dp0agent-data\token.txt"
+set "ARIANE_ASSET_DB=%~dp0agent-data\assets.sqlite3"
+set "ARIANE_GAME_DIR=C:\Games\GTA San Andreas"
+"%~dp0.venv-agent\Scripts\arianectl.exe" --state-dir "%~dp0agent-data\state" --discovery-dir "%~dp0agent-data\discovery" %*

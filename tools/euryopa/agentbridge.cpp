@@ -978,7 +978,14 @@ agentInstanceJson(ObjectInst *inst, bool includeAgentFlag)
 		inst->m_translation.y, inst->m_translation.z, degrees.x, degrees.y, degrees.z,
 		includeAgentFlag ? ",\"agent_scene\":" : "",
 		includeAgentFlag ? (isAgentSceneInstance(inst) ? "true" : "false") : "");
-	return item;
+	std::string out = item;
+	std::string mats = SampMaterialsJson(inst);
+	if(!mats.empty())
+		out.insert(out.size() - 1, ",\"materials\":" + mats);
+	int sampModel = SampExportModel(inst->m_objectId);
+	if(sampModel != inst->m_objectId)
+		out.insert(out.size() - 1, ",\"samp_model_id\":" + std::to_string(sampModel));
+	return out;
 }
 
 static bool
@@ -1020,7 +1027,7 @@ handleRequest(const std::vector<std::string> &lines)
 			"\"analyze_placement\",\"fit_terrain\","
 			"\"place\",\"batch\",\"transform\",\"transform3d\",\"suppress_world_models\","
 			"\"delete\",\"clear\",\"list\",\"validate\",\"camera\",\"capture\","
-			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"mesh_points\",\"save\"]");
+			"\"capture_pose\",\"capture_ortho\",\"ground_scan\",\"samp_sync\",\"mesh_profile\",\"mesh_points\",\"set_material\",\"set_material_text\",\"clear_materials\",\"get_materials\",\"copy_materials\",\"model_materials\",\"txd_textures\",\"custom_models\",\"reload_custom_models\",\"save\"]");
 		return;
 	}
 	if(command == "scene"){
@@ -1999,6 +2006,95 @@ handleRequest(const std::vector<std::string> &lines)
 			else { snprintf(b, sizeof(b), "%.3f", grid[i]); body += b; }
 		}
 		writeResponse(requestId, true, body + "]");
+		return;
+	}
+	// ---- SA-MP material overrides (texture / colour / text per material slot)
+	if(command == "set_material" || command == "set_material_text" || command == "clear_materials" ||
+	   command == "get_materials" || command == "copy_materials"){
+		int id = -1;
+		if(lines.size() < 3 || !parseInt(lines[2], &id)){
+			writeError(requestId, (command + " requires an instance id").c_str()); return;
+		}
+		ObjectInst *inst = GetInstanceByID(id);
+		if(!isAgentSceneInstance(inst) || inst->m_isDeleted){
+			writeError(requestId, "instance does not belong to the active agent scene"); return;
+		}
+		auto colour = [](const std::string &v) -> uint32 { return (uint32)strtoul(v.c_str(), nil, 0); };
+		if(command == "set_material"){
+			// id index model txd texture [colour ARGB]
+			int index, model;
+			if(lines.size() < 7 || !parseInt(lines[3], &index) || !parseInt(lines[4], &model)){
+				writeError(requestId, "set_material requires id index model txd texture [color]"); return;
+			}
+			uint32 c = lines.size() > 7 ? colour(lines[7]) : 0;
+			if(!SampSetMaterial(inst, index, model, lines[5].c_str(), lines[6].c_str(), c)){
+				writeError(requestId, "invalid material index (0-15)"); return;
+			}
+		}else if(command == "set_material_text"){
+			// id index size fontsize bold fontcolor backcolor align font text(\n escapes)
+			int index, size, fontSize, bold, align;
+			if(lines.size() < 12 || !parseInt(lines[3], &index) || !parseInt(lines[4], &size) ||
+			   !parseInt(lines[5], &fontSize) || !parseInt(lines[6], &bold) || !parseInt(lines[9], &align)){
+				writeError(requestId, "set_material_text requires id index size fontsize bold fontcolor backcolor align font text"); return;
+			}
+			std::string text;
+			for(size_t k = 0; k < lines[11].size(); k++){
+				if(lines[11][k] == '\\' && k + 1 < lines[11].size() && lines[11][k+1] == 'n'){ text += '\n'; k++; }
+				else text += lines[11][k];
+			}
+			if(!SampSetMaterialText(inst, index, text.c_str(), size, lines[10].c_str(), fontSize, bold,
+			                        colour(lines[7]), colour(lines[8]), align)){
+				writeError(requestId, "invalid material index (0-15)"); return;
+			}
+		}else if(command == "clear_materials"){
+			int index = -1;
+			if(lines.size() > 3) parseInt(lines[3], &index);
+			int n = SampClearMaterials(inst, index);
+			gAgentSceneRevision++;
+			writeResponse(requestId, true, "\"cleared\":" + std::to_string(n));
+			return;
+		}else if(command == "copy_materials"){
+			int to = -1;
+			ObjectInst *dst = lines.size() > 3 && parseInt(lines[3], &to) ? GetInstanceByID(to) : nil;
+			if(!isAgentSceneInstance(dst) || dst->m_isDeleted){
+				writeError(requestId, "copy_materials requires from_id to_id (agent scene objects)"); return;
+			}
+			if(!SampCopyMaterials(inst, dst)){
+				writeError(requestId, "source has no materials"); return;
+			}
+			inst = dst;
+			id = to;
+		}
+		if(command != "get_materials")
+			gAgentSceneRevision++;
+		std::string mats = SampMaterialsJson(inst);
+		writeResponse(requestId, true, "\"instance_id\":" + std::to_string(id) + ",\"materials\":" + (mats.empty() ? "[]" : mats));
+		return;
+	}
+	if(command == "custom_models" || command == "reload_custom_models"){
+		// SA-MP custom models from <server>/models/artconfig.txt (or a given folder)
+		int loaded = -1;
+		if(command == "reload_custom_models")
+			loaded = SampLoadCustomModels(lines.size() > 2 && !lines[2].empty() && lines[2] != "-" ? lines[2].c_str() : nil);
+		std::string body = SampCustomModelsJson();
+		if(loaded >= 0) body += ",\"loaded\":" + std::to_string(loaded);
+		writeResponse(requestId, true, body);
+		return;
+	}
+	if(command == "model_materials"){
+		int objectId;
+		ObjectDef *object = lines.size() > 2 ? resolveObject(lines[2], &objectId) : nil;
+		if(object == nil){ writeError(requestId, "model_materials requires a model"); return; }
+		std::string body = SampModelMaterialsJson(objectId);
+		if(body.empty()){ writeError(requestId, "unknown model"); return; }
+		writeResponse(requestId, true, body);
+		return;
+	}
+	if(command == "txd_textures"){
+		if(lines.size() < 3){ writeError(requestId, "txd_textures requires a txd name"); return; }
+		std::string list = SampTxdTexturesJson(lines[2].c_str());
+		if(list == "null"){ writeError(requestId, "unknown txd"); return; }
+		writeResponse(requestId, true, "\"txd\":\"" + jsonEscape(lines[2].c_str()) + "\",\"textures\":" + list);
 		return;
 	}
 	if(command == "mesh_points"){

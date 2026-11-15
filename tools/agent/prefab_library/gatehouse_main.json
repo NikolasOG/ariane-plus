@@ -1,0 +1,80 @@
+{
+ "name": "gatehouse_main",
+ "notes": "8 m opening; container posts 2 high across the wall, hut + lamp on posts, wire leaves (one open, one half)",
+ "parts": [
+  {
+   "model": 1218,
+   "dx": 7.87,
+   "dy": -4.5,
+   "heading": 128.25,
+   "on": null
+  },
+  {
+   "model": 1222,
+   "dx": -7.87,
+   "dy": -4.5,
+   "heading": 218.79,
+   "on": null
+  },
+  {
+   "model": 988,
+   "dx": 2.082,
+   "dy": -2.707,
+   "heading": 230.0,
+   "on": null
+  },
+  {
+   "model": 988,
+   "dx": -3.85,
+   "dy": -3.35,
+   "heading": 270.0,
+   "on": null
+  },
+  {
+   "model": 2935,
+   "dx": 5.57,
+   "dy": -2.0,
+   "heading": 180.0,
+   "on": null
+  },
+  {
+   "model": 2934,
+   "dx": -5.57,
+   "dy": -2.0,
+   "heading": 180.0,
+   "on": null
+  },
+  {
+   "model": 2932,
+   "dx": 5.57,
+   "dy": -2.0,
+   "heading": 180.0,
+   "on": 4,
+   "dz": 2.9
+  },
+  {
+   "model": 2932,
+   "dx": -5.57,
+   "dy": -2.0,
+   "heading": 180.0,
+   "on": 5,
+   "dz": 2.9
+  },
+  {
+   "model": 1637,
+   "dx": 5.44,
+   "dy": 1.0,
+   "heading": 180.0,
+   "on": 6,
+   "dz": 2.74
+  },
+  {
+   "model": 1297,
+   "dx": -5.57,
+   "dy": -2.0,
+   "heading": 180.0,
+   "on": 7,
+   "dz": 4.84
+  }
+ ]
+}

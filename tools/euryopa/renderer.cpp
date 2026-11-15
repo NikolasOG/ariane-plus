@@ -571,10 +571,12 @@ RenderInst(ObjectInst *inst)
 	highlightAlpha = inst->m_highlight == HIGHLIGHT_SELECTION ?
 		(uint8)(gSelectionHighlightOpacity * 255 / 100) : 128;
 
+	SampPushInstMaterials(inst);
 	if(obj->m_type == ObjectDef::ATOMIC)
 		((rw::Atomic*)inst->m_rwObject)->render();
 	else if(obj->m_type == ObjectDef::CLUMP)
 		((rw::Clump*)inst->m_rwObject)->render();
+	SampPopInstMaterials();
 
 	highlightColor = black;
 	if(obj->m_noBackfaceCulling)

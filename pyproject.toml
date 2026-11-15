@@ -25,4 +25,4 @@ packages = ["ariane_agent_tools"]
 ariane_agent_tools = "tools/agent"
 
 [tool.setuptools.package-data]
-ariane_agent_tools = ["reference-data/*.json"]
+ariane_agent_tools = ["reference-data/*.json", "prefab_library/*.json", "examples/*.json", "scripts/*", "MAPPING_TOOLKIT.md"]

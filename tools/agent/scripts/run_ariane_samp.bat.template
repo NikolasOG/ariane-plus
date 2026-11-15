@@ -1,0 +1,10 @@
+@echo off
+rem Starts Ariane (SA-MP edition) on the clean SA-MP copy of GTA:SA.
+rem ARIANE_GAME_DIR tells this fork which game folder to load; Ariane's own
+rem settings/prefabs stay next to ariane.exe, so the game folder isn't touched.
+rem The agent bridge listens on 127.0.0.1 only and requires the token in
+rem agent-data\token.txt (used by arianectl.cmd / the MCP server).
+set "ARIANE_GAME_DIR=C:\Games\GTA San Andreas"
+set "ARIANE_ENGINE_TCP_PORT=48731"
+set /p ARIANE_ENGINE_TOKEN=<"%~dp0agent-data\token.txt"
+start "" "%~dp0ariane\bin\win-amd64-d3d9\Release\ariane.exe"

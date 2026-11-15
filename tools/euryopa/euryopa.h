@@ -6,6 +6,7 @@
 #include <skeleton.h>
 #include "imgui/ImGuizmo.h"
 #include <vector>
+#include <string>
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
@@ -110,6 +111,7 @@ bool IntersectRayColModel(const Ray &worldRay, ObjectInst *inst, rw::V3d *hitPos
 bool GetRenderBounds(int objectId, rw::V3d *outMin, rw::V3d *outMax);
 bool GetMeshSideAreas(int objectId, float out[6]);
 #include <vector>
+#include <string>
 bool GetMeshBottomGrid(int objectId, int n, std::vector<float> *grid, rw::V3d *outMin, rw::V3d *outMax);
 bool IntersectRayColModelSurface(const Ray &worldRay, ObjectInst *inst, const rw::Matrix *invMat, rw::V3d *hitPos, int *surface);
 extern bool gCameraOrtho;		// agent top-down capture: parallel projection
@@ -571,6 +573,23 @@ void SampMenu(void);
 void SampPopups(void);
 void SampLoadDefinitions(void);
 bool SampModelsLoaded(void);
+// SA-MP material overrides (SetDynamicObjectMaterial / ...Text) on layer objects
+void SampPushInstMaterials(ObjectInst *inst);
+void SampPopInstMaterials(void);
+std::string SampMaterialsJson(ObjectInst *inst);
+bool SampSetMaterial(ObjectInst *inst, int index, int model, const char *txd, const char *tex, uint32 color);
+bool SampSetMaterialText(ObjectInst *inst, int index, const char *text, int size, const char *font, int fontSize,
+	int bold, uint32 fontColor, uint32 backColor, int align);
+int SampClearMaterials(ObjectInst *inst, int index);
+bool SampCopyMaterials(ObjectInst *from, ObjectInst *to);
+std::string SampModelMaterialsJson(int model);
+std::string SampTxdTexturesJson(const char *txdName);
+// SA-MP custom models (<server>/models/artconfig.txt AddSimpleModel): negative SA-MP ids <-> internal ids
+int SampLoadCustomModels(const char *dir);
+std::string SampCustomModelsJson(void);
+int SampResolveModel(int model);
+int SampExportModel(int model);
+const char *SampCustomModelDff(int internalId);
 
 // Game Data structures
 
@@ -611,6 +630,7 @@ void LoadTxd(int i, const char *path);
 void TxdMakeCurrent(int i);
 void TxdSetParent(const char *child, const char *parent);
 void SetTxdLookupContext(const char *objectName, int txdSlot);
+rw::Texture *FindTxdTexture(int slot, const char *name);
 
 
 struct ColFileHeader

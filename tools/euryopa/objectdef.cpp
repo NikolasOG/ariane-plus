@@ -317,7 +317,8 @@ ObjectDef::LoadAtomic(void)
 	int n;
 	bool populate2dfx = m_effectIndex < 0 && m_numEffects == 0;
 
-	const char *loosePath = ModloaderFindOverride(this->m_name, "dff");
+	const char *loosePath = SampCustomModelDff(this->m_id);
+	if(loosePath == nil) loosePath = ModloaderFindOverride(this->m_name, "dff");
 	if(loosePath){
 		buffer = ReadLooseFile(loosePath, &size);
 		looseFile = true;
@@ -365,7 +366,8 @@ ObjectDef::LoadClump(void)
 	rw::Atomic *atomic;
 	bool populate2dfx = m_effectIndex < 0 && m_numEffects == 0;
 
-	const char *loosePath = ModloaderFindOverride(this->m_name, "dff");
+	const char *loosePath = SampCustomModelDff(this->m_id);
+	if(loosePath == nil) loosePath = ModloaderFindOverride(this->m_name, "dff");
 	if(loosePath){
 		buffer = ReadLooseFile(loosePath, &size);
 		looseFile = true;
@@ -401,7 +403,7 @@ ObjectDef::Load(void)
 	if(m_cantLoad)
 		return;
 
-	bool hasLooseDff = ModloaderFindOverride(this->m_name, "dff") != nil;
+	bool hasLooseDff = SampCustomModelDff(this->m_id) != nil || ModloaderFindOverride(this->m_name, "dff") != nil;
 
 	if(this->m_imageIndex < 0 && !hasLooseDff){
 		log("warning: no streaming info for object %s %d %X\n", this->m_name, this->m_id, this->m_imageIndex);

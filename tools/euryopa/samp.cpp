@@ -38,7 +38,20 @@ static int gRotMode = -1;		// how a matrix quaternion maps onto ObjectInst::m_ro
 static bool gSettingsLoaded;
 static bool gOpenExport, gOpenServer;
 
-struct SampRawObject { int model; float x, y, z, rx, ry, rz; int world, interior; };
+// SetDynamicObjectMaterial / SetDynamicObjectMaterialText on one material slot
+struct SampMaterial
+{
+	int index;
+	bool text;
+	int model;			// texture: model id SA-MP loads the txd through (the txd name wins here)
+	std::string txd, tex;
+	uint32 color;			// ARGB, 0 = keep the model's colour
+	std::string str, font;		// text
+	int size, fontSize, bold, align;
+	uint32 fontColor, backColor;
+};
+
+struct SampRawObject { int model; float x, y, z, rx, ry, rz; int world, interior; std::vector<SampMaterial> mats; };
 struct SampRawRemoval { int model; float x, y, z, radius; };
 
 // objects Ariane can't render (SA-MP-only models) and removals that matched nothing:
@@ -46,8 +59,367 @@ struct SampRawRemoval { int model; float x, y, z, radius; };
 static std::vector<SampRawObject> gRawObjects;
 static std::vector<SampRawRemoval> gRawRemovals;
 static std::map<ObjectInst*, int> gInstWorld;	// virtual world per layer object (-1 = all)
+static std::map<ObjectInst*, std::vector<SampMaterial>> gInstMaterials;	// material overrides per layer object
 
 static const float DEG2RAD = 3.14159265358979f / 180.0f;
+static void LoadSettings(void);
+
+// ------------------------------------------------------------------ material overrides
+//
+// Texture overrides are drawn by swapping the material's texture and colour
+// around the instance's render call (materials are shared by every instance of
+// a model). Text materials are drawn as their background colour - the text
+// itself is only rendered in game.
+
+static void
+PutMaterial(std::vector<SampMaterial> &list, const SampMaterial &m)
+{
+	for(SampMaterial &e : list)
+		if(e.index == m.index){ e = m; return; }
+	list.push_back(m);
+}
+
+static std::map<std::string, rw::Texture*> gMatTexCache;
+
+static rw::Texture*
+ResolveMaterialTexture(const SampMaterial &m)
+{
+	if(m.text || m.tex.empty() || rw::strncmp_ci(m.tex.c_str(), "none", 5) == 0)
+		return nil;
+	std::string key = m.txd + "/" + m.tex + "/" + std::to_string(m.model);
+	std::map<std::string, rw::Texture*>::iterator it = gMatTexCache.find(key);
+	if(it != gMatTexCache.end())
+		return it->second;
+	rw::Texture *t = nil;
+	int slot = m.model < 0 ? -1 : FindTxdSlot(m.txd.c_str());
+	if(slot < 0){
+		ObjectDef *def = GetObjectDef(SampResolveModel(m.model));
+		if(def) slot = def->m_txdSlot;
+	}
+	if(slot >= 0){
+		if(!IsTxdLoaded(slot))
+			LoadTxd(slot);
+		t = FindTxdTexture(slot, m.tex.c_str());
+	}
+	if(t == nil)
+		log("SA-MP material: texture %s/%s (model %d) not found\n", m.txd.c_str(), m.tex.c_str(), m.model);
+	gMatTexCache[key] = t;
+	return t;
+}
+
+struct SampMatBackup { rw::Material *mat; rw::Texture *tex; rw::RGBA color; };
+struct SampGeoBackup { rw::Geometry *geo; uint32 flags; };
+static std::vector<SampMatBackup> gMatBackups;
+static std::vector<SampGeoBackup> gGeoBackups;
+
+static void
+ApplyMaterialsToGeometry(rw::Geometry *g, const std::vector<SampMaterial> &mats)
+{
+	if(g == nil)
+		return;
+	bool colour = false;
+	for(const SampMaterial &m : mats){
+		if(m.index < 0 || m.index >= g->matList.numMaterials)
+			continue;
+		rw::Material *mat = g->matList.materials[m.index];
+		if(mat == nil)
+			continue;
+		SampMatBackup b = { mat, mat->texture, mat->color };
+		gMatBackups.push_back(b);
+		uint32 c = m.color;
+		if(m.text){
+			mat->texture = nil;
+			// transparent background: show a faint panel in the font colour
+			c = (m.backColor >> 24) ? m.backColor : ((m.fontColor & 0x00FFFFFF) | 0x80000000);
+		}else{
+			rw::Texture *t = ResolveMaterialTexture(m);
+			if(t) mat->texture = t;
+		}
+		if(c != 0){
+			mat->color.red = c >> 16 & 0xFF;
+			mat->color.green = c >> 8 & 0xFF;
+			mat->color.blue = c & 0xFF;
+			mat->color.alpha = c >> 24 & 0xFF;
+			colour = true;
+		}
+	}
+	if(colour){
+		SampGeoBackup gb = { g, g->flags };
+		gGeoBackups.push_back(gb);
+		g->flags |= rw::Geometry::MODULATE;
+	}
+}
+
+void
+SampPushInstMaterials(ObjectInst *inst)
+{
+	if(gInstMaterials.empty() || inst == nil || inst->m_rwObject == nil)
+		return;
+	std::map<ObjectInst*, std::vector<SampMaterial>>::iterator it = gInstMaterials.find(inst);
+	if(it == gInstMaterials.end() || it->second.empty())
+		return;
+	ObjectDef *obj = GetObjectDef(inst->m_objectId);
+	if(obj == nil)
+		return;
+	if(obj->m_type == ObjectDef::ATOMIC)
+		ApplyMaterialsToGeometry(((rw::Atomic*)inst->m_rwObject)->geometry, it->second);
+	else{
+		rw::Clump *clump = (rw::Clump*)inst->m_rwObject;
+		FORLIST(lnk, clump->atomics)
+			ApplyMaterialsToGeometry(rw::Atomic::fromClump(lnk)->geometry, it->second);
+	}
+}
+
+void
+SampPopInstMaterials(void)
+{
+	for(size_t i = gMatBackups.size(); i-- > 0; ){
+		gMatBackups[i].mat->texture = gMatBackups[i].tex;
+		gMatBackups[i].mat->color = gMatBackups[i].color;
+	}
+	for(size_t i = gGeoBackups.size(); i-- > 0; )
+		gGeoBackups[i].geo->flags = gGeoBackups[i].flags;
+	gMatBackups.clear();
+	gGeoBackups.clear();
+}
+
+static std::string
+JsonStr(const std::string &s)
+{
+	std::string out = "\"";
+	for(char c : s){
+		if(c == '"' || c == '\\'){ out += '\\'; out += c; }
+		else if(c == '\n') out += "\\n";
+		else if((unsigned char)c < 0x20) out += ' ';
+		else out += c;
+	}
+	return out + "\"";
+}
+
+static std::string
+MaterialJson(const SampMaterial &m)
+{
+	char b[160];
+	std::string s;
+	if(m.text){
+		snprintf(b, sizeof(b), "{\"index\":%d,\"kind\":\"text\",\"size\":%d,\"font_size\":%d,\"bold\":%d,"
+			"\"font_color\":\"0x%08X\",\"back_color\":\"0x%08X\",\"align\":%d,\"font\":",
+			m.index, m.size, m.fontSize, m.bold, m.fontColor, m.backColor, m.align);
+		s = b + JsonStr(m.font) + ",\"text\":" + JsonStr(m.str) + "}";
+	}else{
+		snprintf(b, sizeof(b), "{\"index\":%d,\"kind\":\"texture\",\"model\":%d,\"color\":\"0x%08X\",\"txd\":",
+			m.index, m.model, m.color);
+		s = b + JsonStr(m.txd) + ",\"texture\":" + JsonStr(m.tex) + "}";
+	}
+	return s;
+}
+
+std::string
+SampMaterialsJson(ObjectInst *inst)
+{
+	std::map<ObjectInst*, std::vector<SampMaterial>>::iterator it = gInstMaterials.find(inst);
+	if(it == gInstMaterials.end() || it->second.empty())
+		return "";
+	std::string s = "[";
+	for(size_t i = 0; i < it->second.size(); i++){
+		if(i) s += ",";
+		s += MaterialJson(it->second[i]);
+	}
+	return s + "]";
+}
+
+bool
+SampSetMaterial(ObjectInst *inst, int index, int model, const char *txd, const char *tex, uint32 color)
+{
+	if(inst == nil || index < 0 || index > 15)
+		return false;
+	SampMaterial m = {};
+	m.index = index; m.text = false; m.model = model; m.txd = txd ? txd : "none"; m.tex = tex ? tex : "none";
+	m.color = color;
+	PutMaterial(gInstMaterials[inst], m);
+	inst->m_isDirty = true;
+	return true;
+}
+
+bool
+SampSetMaterialText(ObjectInst *inst, int index, const char *text, int size, const char *font, int fontSize,
+	int bold, uint32 fontColor, uint32 backColor, int align)
+{
+	if(inst == nil || index < 0 || index > 15)
+		return false;
+	SampMaterial m = {};
+	m.index = index; m.text = true; m.str = text ? text : ""; m.size = size; m.font = font && font[0] ? font : "Arial";
+	m.fontSize = fontSize; m.bold = bold; m.fontColor = fontColor; m.backColor = backColor; m.align = align;
+	PutMaterial(gInstMaterials[inst], m);
+	inst->m_isDirty = true;
+	return true;
+}
+
+int
+SampClearMaterials(ObjectInst *inst, int index)
+{
+	std::map<ObjectInst*, std::vector<SampMaterial>>::iterator it = gInstMaterials.find(inst);
+	if(it == gInstMaterials.end())
+		return 0;
+	int n = 0;
+	std::vector<SampMaterial> &list = it->second;
+	for(size_t i = list.size(); i-- > 0; )
+		if(index < 0 || list[i].index == index){ list.erase(list.begin() + i); n++; }
+	if(list.empty())
+		gInstMaterials.erase(it);
+	return n;
+}
+
+bool
+SampCopyMaterials(ObjectInst *from, ObjectInst *to)
+{
+	std::map<ObjectInst*, std::vector<SampMaterial>>::iterator it = gInstMaterials.find(from);
+	if(it == gInstMaterials.end() || to == nil)
+		return false;
+	gInstMaterials[to] = it->second;
+	return true;
+}
+
+// Material slots of a model: index, texture, colour - plus every texture of its txd
+std::string
+SampModelMaterialsJson(int model)
+{
+	ObjectDef *obj = GetObjectDef(model);
+	if(obj == nil)
+		return "";
+	RequestObject(model);
+	LoadAllRequestedObjects();
+	TxdDef *td = GetTxdDef(obj->m_txdSlot);
+	std::string s = "\"model\":" + std::to_string(model) + ",\"name\":" + JsonStr(obj->m_name) +
+		",\"txd\":" + JsonStr(td ? td->name : "") + ",\"materials\":[";
+	int n = 0;
+	auto addGeometry = [&](rw::Geometry *g){
+		if(g == nil) return;
+		for(int i = 0; i < g->matList.numMaterials; i++){
+			rw::Material *m = g->matList.materials[i];
+			char b[200];
+			snprintf(b, sizeof(b), "%s{\"index\":%d,\"color\":\"0x%02X%02X%02X%02X\",\"texture\":", n ? "," : "", i,
+				m ? m->color.alpha : 0, m ? m->color.red : 0, m ? m->color.green : 0, m ? m->color.blue : 0);
+			s += b;
+			s += JsonStr(m && m->texture ? m->texture->name : "") + "}";
+			n++;
+		}
+	};
+	if(obj->m_type == ObjectDef::ATOMIC){
+		if(obj->m_atomics[0]) addGeometry(obj->m_atomics[0]->geometry);
+	}else if(obj->m_clump){
+		FORLIST(lnk, obj->m_clump->atomics){
+			addGeometry(rw::Atomic::fromClump(lnk)->geometry);
+			break;		// SA-MP indexes the first geometry's materials
+		}
+	}
+	s += "],\"txd_textures\":" + SampTxdTexturesJson(td ? td->name : "");
+	return s;
+}
+
+std::string
+SampTxdTexturesJson(const char *txdName)
+{
+	int slot = txdName && txdName[0] ? FindTxdSlot(txdName) : -1;
+	if(slot < 0)
+		return "null";
+	if(!IsTxdLoaded(slot))
+		LoadTxd(slot);
+	TxdDef *td = GetTxdDef(slot);
+	std::string s = "[";
+	int n = 0;
+	if(td && td->txd){
+		FORLIST(lnk, td->txd->textures){
+			rw::Texture *t = rw::Texture::fromDict(lnk);
+			if(t == nil) continue;
+			if(n++) s += ",";
+			s += JsonStr(t->name);
+		}
+	}
+	return s + "]";
+}
+
+// --- material text in files: escapes \n, \\ and keeps everything on one line
+static std::string
+EscapeLine(const std::string &s)
+{
+	std::string out;
+	for(char c : s){
+		if(c == '\\') out += "\\\\";
+		else if(c == '\n') out += "\\n";
+		else if(c == '\r') continue;
+		else out += c;
+	}
+	return out;
+}
+
+static std::string
+UnescapeLine(const char *s)
+{
+	std::string out;
+	for(; *s; s++){
+		if(*s == '\\' && s[1] == 'n'){ out += '\n'; s++; }
+		else if(*s == '\\' && s[1] == '\\'){ out += '\\'; s++; }
+		else out += *s;
+	}
+	return out;
+}
+
+static std::string
+PawnString(const std::string &s)
+{
+	std::string out = "\"";
+	for(char c : s){
+		if(c == '"' || c == '\\'){ out += '\\'; out += c; }
+		else if(c == '\n') out += "\\n";
+		else out += c;
+	}
+	return out + "\"";
+}
+
+// live file lines: M <index> <model> <txd> <texture> <ARGB hex>
+//                  T <index> <size> <fontsize> <bold> <fontcolor> <backcolor> <align> <font, '_' for spaces> <text>
+static void
+WriteMaterialLines(FILE *f, const std::vector<SampMaterial> &mats)
+{
+	for(const SampMaterial &m : mats){
+		if(m.text){
+			std::string font = m.font;
+			for(char &c : font) if(c == ' ') c = '_';
+			fprintf(f, "T %d %d %d %d 0x%08X 0x%08X %d %s %s\n", m.index, m.size, m.fontSize, m.bold,
+				m.fontColor, m.backColor, m.align, font.c_str(), EscapeLine(m.str).c_str());
+		}else
+			fprintf(f, "M %d %d %s %s 0x%08X\n", m.index, m.model, m.txd.c_str(), m.tex.c_str(), m.color);
+	}
+}
+
+static bool
+ParseMaterialLine(const char *line, SampMaterial *m)
+{
+	*m = SampMaterial();
+	if(line[0] == 'M' && line[1] == ' '){
+		char txd[64], tex[96];
+		unsigned int color;
+		if(sscanf(line + 2, "%d %d %63s %95s %x", &m->index, &m->model, txd, tex, &color) != 5)
+			return false;
+		m->text = false; m->txd = txd; m->tex = tex; m->color = color;
+		return true;
+	}
+	if(line[0] == 'T' && line[1] == ' '){
+		char font[64];
+		unsigned int fc, bc;
+		int used = 0;
+		if(sscanf(line + 2, "%d %d %d %d %x %x %d %63s %n", &m->index, &m->size, &m->fontSize, &m->bold,
+		          &fc, &bc, &m->align, font, &used) < 8)
+			return false;
+		for(char *c = font; *c; c++) if(*c == '_') *c = ' ';
+		std::string rest = used > 0 ? UnescapeLine(line + 2 + used) : "";
+		while(!rest.empty() && (rest.back() == '\n' || rest.back() == '\r')) rest.pop_back();
+		m->text = true; m->font = font; m->fontColor = fc; m->backColor = bc; m->str = rest;
+		return true;
+	}
+	return false;
+}
 
 // ------------------------------------------------------------------ layer
 
@@ -181,6 +553,8 @@ SampLoadDefinitions(void)
 	log("SA-MP: loaded SA-MP object definitions from %s\n", gSampModelDir);
 }
 
+
+
 // ------------------------------------------------------------------ rotation maths
 
 static void
@@ -302,6 +676,7 @@ GetMatrixEuler(const rw::Matrix &m, float *rx, float *ry, float *rz)
 static ObjectInst*
 SampCreateInstance(int model, float x, float y, float z, float rx, float ry, float rz, int world, int interior)
 {
+	model = SampResolveModel(model);
 	ObjectDef *obj = GetObjectDef(model);
 	if(obj == nil)
 		return nil;
@@ -458,18 +833,42 @@ static const CallLayout gCalls[] = {
 	{ "Map_RemoveBuilding",		0, true, -1, -1 },
 };
 
-struct ImportStats { int objects, raw, removals, removedInsts, rawRemovals, skipped, scaled; };
+struct ImportStats { int objects, raw, removals, removedInsts, rawRemovals, skipped, scaled, materials; };
+
+// the object material calls in imported code apply to (Texture Studio style:
+// tmpobjid = CreateDynamicObject(...); SetDynamicObjectMaterial(tmpobjid, ...))
+static ObjectInst *gLastImportInst;
+static int gLastImportRaw = -1;
 
 static void
 AddObject(ImportStats *st, int model, float x, float y, float z, float rx, float ry, float rz, int world, int interior)
 {
-	if(SampCreateInstance(model, x, y, z, rx, ry, rz, world, interior))
+	ObjectInst *inst = SampCreateInstance(model, x, y, z, rx, ry, rz, world, interior);
+	if(inst){
 		st->objects++;
-	else{
+		gLastImportInst = inst;
+		gLastImportRaw = -1;
+	}else{
 		SampRawObject o = { model, x, y, z, rx, ry, rz, world, interior };
 		gRawObjects.push_back(o);
 		st->raw++;
+		gLastImportInst = nil;
+		gLastImportRaw = (int)gRawObjects.size() - 1;
 	}
+}
+
+static void
+AddMaterialToLast(ImportStats *st, const SampMaterial &m)
+{
+	if(gLastImportInst)
+		PutMaterial(gInstMaterials[gLastImportInst], m);
+	else if(gLastImportRaw >= 0 && gLastImportRaw < (int)gRawObjects.size())
+		PutMaterial(gRawObjects[gLastImportRaw].mats, m);
+	else{
+		st->skipped++;
+		return;
+	}
+	st->materials++;
 }
 
 static void
@@ -485,10 +884,118 @@ AddRemoval(ImportStats *st, int model, float x, float y, float z, float r)
 	}
 }
 
+// material calls: first argument is the object; layouts after it
+//  kind 0: index, model, txd, texture, colour
+//  kind 1: index, text, size, font, fontsize, bold, fontcolor, backcolor, align   (dynamic / Map_ order)
+//  kind 2: text, index, size, font, fontsize, bold, fontcolor, backcolor, align   (native order)
+struct MaterialCall { const char *name; int offset; int kind; };
+static const MaterialCall gMaterialCalls[] = {
+	{ "SetDynamicObjectMaterialText",	1, 1 },
+	{ "SetDynamicObjectMaterial",		1, 0 },
+	{ "Map_SetObjectMaterialText",		1, 1 },
+	{ "Map_SetObjectMaterial",		1, 0 },
+	{ "SetPlayerObjectMaterialText",	2, 2 },
+	{ "SetPlayerObjectMaterial",		2, 0 },
+	{ "SetObjectMaterialText",		1, 2 },
+	{ "SetObjectMaterial",			1, 0 },
+};
+
+static std::string
+ArgTrim(const std::vector<std::string> &a, size_t i)
+{
+	if(i >= a.size()) return "";
+	size_t b = 0, e = a[i].size();
+	while(b < e && isspace((unsigned char)a[i][b])) b++;
+	while(e > b && isspace((unsigned char)a[i][e-1])) e--;
+	return a[i].substr(b, e - b);
+}
+
+static bool
+ArgString(const std::vector<std::string> &a, size_t i, std::string *out)
+{
+	std::string s = ArgTrim(a, i);
+	if(s.size() < 2 || s[0] != '"' || s.back() != '"')
+		return false;
+	out->clear();
+	for(size_t k = 1; k + 1 < s.size(); k++){
+		if(s[k] == '\\' && k + 2 < s.size()){
+			char n = s[++k];
+			*out += n == 'n' ? '\n' : n == 't' ? '\t' : n;
+		}else
+			*out += s[k];
+	}
+	return true;
+}
+
+// integers, hex colours (0xAARRGGBB, -1) and the SA-MP material constants
+static bool
+ArgInt(const std::vector<std::string> &a, size_t i, long long *out)
+{
+	std::string s = ArgTrim(a, i);
+	if(s.empty()) return false;
+	static const struct { const char *name; int value; } names[] = {
+		{ "OBJECT_MATERIAL_SIZE_32x32", 10 }, { "OBJECT_MATERIAL_SIZE_64x32", 20 }, { "OBJECT_MATERIAL_SIZE_64x64", 30 },
+		{ "OBJECT_MATERIAL_SIZE_128x32", 40 }, { "OBJECT_MATERIAL_SIZE_128x64", 50 }, { "OBJECT_MATERIAL_SIZE_128x128", 60 },
+		{ "OBJECT_MATERIAL_SIZE_256x32", 70 }, { "OBJECT_MATERIAL_SIZE_256x64", 80 }, { "OBJECT_MATERIAL_SIZE_256x128", 90 },
+		{ "OBJECT_MATERIAL_SIZE_256x256", 100 }, { "OBJECT_MATERIAL_SIZE_512x64", 110 }, { "OBJECT_MATERIAL_SIZE_512x128", 120 },
+		{ "OBJECT_MATERIAL_SIZE_512x256", 130 }, { "OBJECT_MATERIAL_SIZE_512x512", 140 },
+		{ "OBJECT_MATERIAL_TEXT_ALIGN_LEFT", 0 }, { "OBJECT_MATERIAL_TEXT_ALIGN_CENTER", 1 }, { "OBJECT_MATERIAL_TEXT_ALIGN_RIGHT", 2 },
+		{ "true", 1 }, { "false", 0 },
+	};
+	for(auto &n : names)
+		if(s == n.name){ *out = n.value; return true; }
+	char *end;
+	long long v = strtoll(s.c_str(), &end, 0);
+	if(end == s.c_str() || *end != '\0'){
+		// unsigned hex colours above 0x7FFFFFFF
+		unsigned long long u = strtoull(s.c_str(), &end, 0);
+		if(end == s.c_str() || *end != '\0') return false;
+		v = (long long)u;
+	}
+	*out = v;
+	return true;
+}
+
+static void
+ImportMaterialCall(const MaterialCall *call, const std::vector<std::string> &args, ImportStats *st)
+{
+	int o = call->offset;
+	SampMaterial m = SampMaterial();
+	long long v[8];
+	if(call->kind == 0){
+		if(!ArgInt(args, o, &v[0]) || !ArgInt(args, o + 1, &v[1]) || !ArgString(args, o + 2, &m.txd) ||
+		   !ArgString(args, o + 3, &m.tex)){
+			st->skipped++;
+			return;
+		}
+		v[2] = 0;
+		ArgInt(args, o + 4, &v[2]);
+		m.index = (int)v[0]; m.model = (int)v[1]; m.color = (uint32)v[2]; m.text = false;
+	}else{
+		int ti = call->kind == 1 ? o + 1 : o, ii = call->kind == 1 ? o : o + 1;
+		long long def[] = { 0, 90, 0, 24, 1, (long long)0xFFFFFFFF, 0, 0 };
+		if(!ArgString(args, ti, &m.str) || (args.size() > (size_t)ii && !ArgInt(args, ii, &v[0]))){
+			st->skipped++;
+			return;
+		}
+		if(args.size() <= (size_t)ii) v[0] = 0;
+		for(int k = 1; k < 8; k++){
+			v[k] = def[k];
+			if(k == 2){ if(!ArgString(args, o + 3, &m.font)) m.font = "Arial"; continue; }
+			ArgInt(args, o + 1 + k, &v[k]);
+		}
+		m.text = true; m.index = (int)v[0]; m.size = (int)v[1]; m.fontSize = (int)v[3]; m.bold = (int)v[4];
+		m.fontColor = (uint32)v[5]; m.backColor = (uint32)v[6]; m.align = (int)v[7];
+	}
+	AddMaterialToLast(st, m);
+}
+
 static void
 ImportPawn(std::string &text, ImportStats *st)
 {
 	StripComments(text);
+	gLastImportInst = nil;
+	gLastImportRaw = -1;
 	std::vector<std::string> args;
 	for(size_t i = 0; i < text.size(); i++){
 		if(!(isalpha((unsigned char)text[i]) || text[i] == '_'))
@@ -501,14 +1008,22 @@ ImportPawn(std::string &text, ImportStats *st)
 		const CallLayout *call = nil;
 		for(const CallLayout &c : gCalls)
 			if(ident == c.name){ call = &c; break; }
+		const MaterialCall *mcall = nil;
+		if(call == nil)
+			for(const MaterialCall &c : gMaterialCalls)
+				if(ident == c.name){ mcall = &c; break; }
 		size_t k = j;
 		while(k < text.size() && isspace((unsigned char)text[k])) k++;
-		if(call == nil || k >= text.size() || text[k] != '('){
+		if((call == nil && mcall == nil) || k >= text.size() || text[k] != '('){
 			i = j - 1;
 			continue;
 		}
 		size_t after = ParseArgs(text, k + 1, args);
 		i = after - 1;
+		if(mcall){
+			ImportMaterialCall(mcall, args, st);
+			continue;
+		}
 		double v[7];
 		int o = call->offset;
 		if(call->removal){
@@ -604,14 +1119,16 @@ SampImportFile(const char *path)
 		text.append(buf, n);
 	fclose(f);
 
+	LoadSettings();
+	SampLoadCustomModels(nil);
 	ImportStats st = {};
 	if(HasExtCi(path, ".map"))
 		ImportMtaMap(text, &st);
 	else
 		ImportPawn(text, &st);
 
-	log("SA-MP import %s: %d objects, %d kept unrendered, %d removals (%d buildings hidden, %d unmatched), %d skipped, %d scaled\n",
-		path, st.objects, st.raw, st.removals, st.removedInsts, st.rawRemovals, st.skipped, st.scaled);
+	log("SA-MP import %s: %d objects, %d kept unrendered, %d removals (%d buildings hidden, %d unmatched), %d materials, %d skipped, %d scaled\n",
+		path, st.objects, st.raw, st.removals, st.removedInsts, st.rawRemovals, st.materials, st.skipped, st.scaled);
 	Toast(TOAST_SPAWN, "SA-MP import: %d objects, %d removals%s%s", st.objects + st.raw, st.removals,
 		st.raw ? " (some SA-MP-only models aren't shown)" : "",
 		st.scaled ? " - scaled MTA objects imported at normal size" : "");
@@ -651,12 +1168,15 @@ CollectExport(ExportLists *out)
 				continue;
 			inst->UpdateMatrix();
 			SampRawObject o;
-			o.model = inst->m_objectId;
+			o.model = SampExportModel(inst->m_objectId);
 			o.x = inst->m_translation.x; o.y = inst->m_translation.y; o.z = inst->m_translation.z;
 			GetMatrixEuler(inst->m_matrix, &o.rx, &o.ry, &o.rz);
 			std::map<ObjectInst*, int>::iterator it = gInstWorld.find(inst);
 			o.world = it == gInstWorld.end() ? -1 : it->second;
 			o.interior = inst->m_area;
+			std::map<ObjectInst*, std::vector<SampMaterial>>::iterator mt = gInstMaterials.find(inst);
+			if(mt != gInstMaterials.end())
+				o.mats = mt->second;
 			out->objects.push_back(o);
 			continue;
 		}
@@ -682,6 +1202,19 @@ CollectExport(ExportLists *out)
 	}
 	out->objects.insert(out->objects.end(), gRawObjects.begin(), gRawObjects.end());
 	out->removals.insert(out->removals.end(), gRawRemovals.begin(), gRawRemovals.end());
+	// a removal loaded from the server file before its IPL streamed in is kept
+	// raw, and deleting the building later adds it again: export each once
+	std::vector<SampRawRemoval> unique;
+	for(const SampRawRemoval &r : out->removals){
+		bool dup = false;
+		for(const SampRawRemoval &u : unique)
+			if(u.model == r.model && fabsf(u.x - r.x) < 0.01f && fabsf(u.y - r.y) < 0.01f && fabsf(u.z - r.z) < 0.01f){
+				dup = true;
+				break;
+			}
+		if(!dup) unique.push_back(r);
+	}
+	out->removals.swap(unique);
 }
 
 static void
@@ -703,23 +1236,49 @@ WritePawn(const char *path, const char *mapName, int format, const ExportLists &
 	SanitizeName(name);
 	fprintf(f, "// Exported by Ariane (SA-MP edition): map '%s' - %d objects, %d removed buildings\n",
 		name, (int)l.objects.size(), (int)l.removals.size());
+	bool anyMats = false;
+	for(const SampRawObject &o : l.objects)
+		if(!o.mats.empty()) anyMats = true;
+	// material calls in the matching API: Map_* (custom), streamer or native
+	const char *setMat = format == 0 ? "Map_SetObjectMaterial" : format == 1 ? "SetDynamicObjectMaterial" : "SetObjectMaterial";
+	auto writeMats = [&](const SampRawObject &o){
+		for(const SampMaterial &m : o.mats){
+			if(!m.text)
+				fprintf(f, "    %s(tmpobjid, %d, %d, %s, %s, 0x%08X);\n", setMat, m.index, m.model,
+					PawnString(m.txd).c_str(), PawnString(m.tex).c_str(), m.color);
+			else if(format == 2)
+				fprintf(f, "    SetObjectMaterialText(tmpobjid, %s, %d, %d, %s, %d, %d, 0x%08X, 0x%08X, %d);\n",
+					PawnString(m.str).c_str(), m.index, m.size, PawnString(m.font).c_str(), m.fontSize, m.bold,
+					m.fontColor, m.backColor, m.align);
+			else
+				fprintf(f, "    %sText(tmpobjid, %d, %s, %d, %s, %d, %d, 0x%08X, 0x%08X, %d);\n", setMat,
+					m.index, PawnString(m.str).c_str(), m.size, PawnString(m.font).c_str(), m.fontSize, m.bold,
+					m.fontColor, m.backColor, m.align);
+		}
+	};
 	if(format == 0){
 		fprintf(f, "stock Map_%s()\n{\n", name);
+		if(anyMats) fprintf(f, "    new tmpobjid;\n");
 		for(const SampRawRemoval &r : l.removals)
 			fprintf(f, "    Map_RemoveBuilding(%d, %.4f, %.4f, %.4f, %.2f);\n", r.model, r.x, r.y, r.z, r.radius);
-		for(const SampRawObject &o : l.objects)
-			fprintf(f, "    Map_CreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
-				o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior);
+		for(const SampRawObject &o : l.objects){
+			fprintf(f, "    %sMap_CreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
+				o.mats.empty() ? "" : "tmpobjid = ", o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior);
+			writeMats(o);
+		}
 		fprintf(f, "    return %d;\n}\n", (int)l.objects.size());
 	}else{
 		fprintf(f, "// --- objects: call from OnGameModeInit\nstock CreateMap_%s()\n{\n", name);
+		if(anyMats) fprintf(f, "    new tmpobjid;\n");
 		for(const SampRawObject &o : l.objects){
+			const char *assign = o.mats.empty() ? "" : "tmpobjid = ";
 			if(format == 1)
-				fprintf(f, "    CreateDynamicObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
-					o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior < 0 ? -1 : o.interior);
+				fprintf(f, "    %sCreateDynamicObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %d, %d);\n",
+					assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior < 0 ? -1 : o.interior);
 			else
-				fprintf(f, "    CreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, 300.0);\n",
-					o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz);
+				fprintf(f, "    %sCreateObject(%d, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, 300.0);\n",
+					assign, o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz);
+			writeMats(o);
 		}
 		fprintf(f, "}\n\n// --- removed buildings: call from OnPlayerConnect\nstock RemoveMap_%s(playerid)\n{\n", name);
 		for(const SampRawRemoval &r : l.removals)
@@ -798,7 +1357,7 @@ LiveFileEntries(void)
 	FILE *f = fopen(path, "r");
 	if(f == nil)
 		return -1;
-	char line[256];
+	char line[1200];
 	int n = 0;
 	while(fgets(line, sizeof(line), f))
 		if((line[0] == 'O' || line[0] == 'R') && line[1] == ' ')
@@ -820,6 +1379,7 @@ SampLoadFromServer(void)
 		gOpenServer = true;
 		return -1;
 	}
+	SampLoadCustomModels(nil);
 	char path[1200];
 	LiveFilePath(path, sizeof(path));
 	FILE *f = fopen(path, "r");
@@ -829,11 +1389,16 @@ SampLoadFromServer(void)
 	}
 	ClearLayer();
 	ImportStats st = {};
-	char line[256];
+	gLastImportInst = nil;
+	gLastImportRaw = -1;
+	char line[1200];
 	while(fgets(line, sizeof(line), f)){
 		int model, world, interior;
 		float x, y, z, rx, ry, rz, radius;
-		if(line[0] == 'O' &&
+		SampMaterial mat;
+		if((line[0] == 'M' || line[0] == 'T') && ParseMaterialLine(line, &mat))
+			AddMaterialToLast(&st, mat);
+		else if(line[0] == 'O' &&
 		   sscanf(line + 1, "%d %f %f %f %f %f %f %d %d", &model, &x, &y, &z, &rx, &ry, &rz, &world, &interior) == 9)
 			AddObject(&st, model, x, y, z, rx, ry, rz, world, interior);
 		else if(line[0] == 'R' &&
@@ -887,8 +1452,10 @@ DoSyncToServer(bool force)
 	fprintf(f, "rev %u\n", (unsigned)time(nil));
 	for(const SampRawRemoval &r : l.removals)
 		fprintf(f, "R %d %.4f %.4f %.4f %.2f\n", r.model, r.x, r.y, r.z, r.radius);
-	for(const SampRawObject &o : l.objects)
+	for(const SampRawObject &o : l.objects){
 		fprintf(f, "O %d %.4f %.4f %.4f %.4f %.4f %.4f %d %d\n", o.model, o.x, o.y, o.z, o.rx, o.ry, o.rz, o.world, o.interior);
+		WriteMaterialLines(f, o.mats);
+	}
 	fclose(f);
 	remove(path);
 	if(rename(tmp, path) != 0){
@@ -981,6 +1548,7 @@ ClearLayer(void)
 	gRawObjects.clear();
 	gRawRemovals.clear();
 	gInstWorld.clear();
+	gInstMaterials.clear();
 }
 
 void
@@ -1120,4 +1688,222 @@ SampPopups(void)
 		if(ImGui::Button("Cancel", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 	}
+}
+
+// ------------------------------------------------------------------ custom models
+//
+// open.mp downloads custom models listed in <server>/models/artconfig.txt:
+//   AddSimpleModel(virtualworld, baseid, newid, "file.dff", "file.txd");
+//   AddSimpleModelTimed(virtualworld, baseid, newid, "file.dff", "file.txd", timeon, timeoff);
+// newid is negative (-1000 .. -30000). Ariane registers each as a runtime
+// object definition at a free internal id (30000+) that borrows the base
+// model's collision and flags; layer objects keep the SA-MP id on export.
+
+struct SampCustomModel
+{
+	int sampId, internalId, baseId, world;
+	std::string dff, txd, dffPath, txdPath;
+	bool ok;
+	std::string error;
+};
+static std::vector<SampCustomModel> gCustomModels;
+static std::map<int, int> gCustomToInternal, gInternalToCustom;
+static std::map<int, std::string> gCustomDffPath;	// internal id -> dff path
+static int gNextCustomInternal = 30000;
+static char gCustomModelsDir[1024];
+static GameFile *gArtconfigFile;
+
+int
+SampResolveModel(int model)
+{
+	if(model >= 0)
+		return model;
+	std::map<int, int>::iterator it = gCustomToInternal.find(model);
+	return it == gCustomToInternal.end() ? -1 : it->second;
+}
+
+int
+SampExportModel(int model)
+{
+	std::map<int, int>::iterator it = gInternalToCustom.find(model);
+	return it == gInternalToCustom.end() ? model : it->second;
+}
+
+const char*
+SampCustomModelDff(int internalId)
+{
+	if(gCustomDffPath.empty())
+		return nil;
+	std::map<int, std::string>::iterator it = gCustomDffPath.find(internalId);
+	return it == gCustomDffPath.end() ? nil : it->second.c_str();
+}
+
+static bool
+FileExistsAbs(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	if(f == nil) return false;
+	fclose(f);
+	return true;
+}
+
+static void
+BaseName(const std::string &file, char *out, size_t size)
+{
+	size_t s = file.find_last_of("/\\");
+	std::string b = s == std::string::npos ? file : file.substr(s + 1);
+	size_t dot = b.find_last_of('.');
+	if(dot != std::string::npos) b = b.substr(0, dot);
+	strncpy(out, b.c_str(), size - 1);
+	out[size - 1] = '\0';
+}
+
+static bool
+RegisterCustomModel(SampCustomModel &cm, int timeOn, int timeOff)
+{
+	ObjectDef *base = GetObjectDef(cm.baseId);
+	if(base == nil){ cm.error = "base model unknown"; return false; }
+	if(!FileExistsAbs(cm.dffPath.c_str())){ cm.error = "dff not found: " + cm.dffPath; return false; }
+	if(!FileExistsAbs(cm.txdPath.c_str())){ cm.error = "txd not found: " + cm.txdPath; return false; }
+	int id;
+	std::map<int, int>::iterator known = gCustomToInternal.find(cm.sampId);
+	if(known != gCustomToInternal.end())
+		id = known->second;			// reload: keep the id placed objects use
+	else{
+		while(gNextCustomInternal < NUMOBJECTDEFS && GetObjectDef(gNextCustomInternal)) gNextCustomInternal++;
+		if(gNextCustomInternal >= NUMOBJECTDEFS){ cm.error = "no free object ids"; return false; }
+		id = gNextCustomInternal++;
+	}
+	ObjectDef *obj = GetObjectDef(id);
+	if(obj == nil){
+		obj = AddObjectDef(id);
+		if(obj == nil){ cm.error = "could not allocate object definition"; return false; }
+		// borrow the base model's flags, draw distance and collision
+		memcpy(obj, base, sizeof(ObjectDef));
+		obj->m_id = id;
+		obj->m_type = ObjectDef::ATOMIC;
+		obj->m_numAtomics = 1;
+		obj->m_atomics[0] = obj->m_atomics[1] = obj->m_atomics[2] = nil;
+		obj->m_drawDist[0] = base->GetLargestDrawDist();
+		obj->m_clump = nil;
+		obj->m_animname[0] = '\0';
+		obj->m_animAsset = nil;
+		obj->m_imageIndex = -1;
+		obj->m_cantLoad = false;
+		obj->m_hasPreRendered = false;
+		obj->m_isBigBuilding = false;
+		obj->m_isHidden = false;
+		obj->m_relatedModel = obj->m_relatedTimeModel = nil;
+		obj->m_effectIndex = -1;
+		obj->m_numEffects = 0;
+		obj->m_pedPathIndex = obj->m_carPathIndex = -1;
+		obj->m_isTimed = timeOn != timeOff;
+		obj->m_timeOn = timeOn;
+		obj->m_timeOff = timeOff;
+		char name[MODELNAMELEN];
+		BaseName(cm.dff, name, sizeof(name));
+		strncpy(obj->m_name, name, MODELNAMELEN);
+		obj->m_name[MODELNAMELEN-1] = '\0';
+		if(gArtconfigFile == nil){
+			static char artName[] = "models\\artconfig.txt";
+			gArtconfigFile = NewGameFile(artName);
+		}
+		obj->m_file = gArtconfigFile;
+	}
+	// own txd slot ("samp:" + name) so a stock txd with the same name isn't touched
+	char txdBase[MODELNAMELEN], slotName[MODELNAMELEN];
+	BaseName(cm.txd, txdBase, sizeof(txdBase));
+	snprintf(slotName, sizeof(slotName), "samp:%s", txdBase);
+	int slot = AddTxdSlot(slotName);
+	if(!IsTxdLoaded(slot))
+		LoadTxd(slot, cm.txdPath.c_str());
+	obj->m_txdSlot = slot;
+	gCustomDffPath[id] = cm.dffPath;
+	gCustomToInternal[cm.sampId] = id;
+	gInternalToCustom[id] = cm.sampId;
+	cm.internalId = id;
+	RequestObject(id);
+	LoadAllRequestedObjects();
+	if(obj->m_atomics[0] == nil){ cm.error = "dff did not load (not a simple single-atomic model?)"; return false; }
+	return true;
+}
+
+// Reads <dir>/artconfig.txt (dir defaults to <server>/models). Returns models loaded.
+int
+SampLoadCustomModels(const char *dir)
+{
+	char path[1200];
+	if(dir && dir[0])
+		strncpy(gCustomModelsDir, dir, sizeof(gCustomModelsDir) - 1);
+	else if(gSampServerDir[0])
+		JoinPath(gCustomModelsDir, sizeof(gCustomModelsDir), gSampServerDir, "models");
+	else
+		return 0;
+	JoinPath(path, sizeof(path), gCustomModelsDir, "artconfig.txt");
+	FILE *f = fopen(path, "rb");
+	if(f == nil){
+		gCustomModels.clear();		// listing only; definitions already registered stay usable
+		return 0;
+	}
+	std::string text;
+	char buf[16384];
+	size_t n;
+	while((n = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
+	fclose(f);
+	StripComments(text);
+	gCustomModels.clear();
+	int loaded = 0;
+	std::vector<std::string> args;
+	const char *calls[] = { "AddSimpleModelTimed", "AddSimpleModel" };
+	size_t pos = 0;
+	while(pos < text.size()){
+		size_t best = std::string::npos;
+		int which = -1;
+		for(int c = 0; c < 2; c++){
+			size_t p = text.find(calls[c], pos);
+			if(p < best){ best = p; which = c; }
+		}
+		if(best == std::string::npos) break;
+		size_t open = text.find('(', best);
+		if(open == std::string::npos) break;
+		pos = ParseArgs(text, open + 1, args);
+		double v[3];
+		SampCustomModel cm;
+		cm.ok = false;
+		cm.internalId = -1;
+		std::string dff, txd;
+		if(args.size() < 5 || !ArgNum(args, 0, &v[0]) || !ArgNum(args, 1, &v[1]) || !ArgNum(args, 2, &v[2]) ||
+		   !ArgString(args, 3, &dff) || !ArgString(args, 4, &txd))
+			continue;
+		cm.world = (int)v[0]; cm.baseId = (int)v[1]; cm.sampId = (int)v[2];
+		cm.dff = dff; cm.txd = txd;
+		char p1[1200], p2[1200];
+		JoinPath(p1, sizeof(p1), gCustomModelsDir, dff.c_str());
+		JoinPath(p2, sizeof(p2), gCustomModelsDir, txd.c_str());
+		cm.dffPath = p1; cm.txdPath = p2;
+		double on = 0, off = 0;
+		if(which == 0 && args.size() >= 7){ ArgNum(args, 5, &on); ArgNum(args, 6, &off); }
+		cm.ok = RegisterCustomModel(cm, (int)on, (int)off);
+		if(cm.ok) loaded++;
+		else log("SA-MP custom model %d (%s): %s\n", cm.sampId, dff.c_str(), cm.error.c_str());
+		gCustomModels.push_back(cm);
+	}
+	log("SA-MP: %d of %d custom models loaded from %s\n", loaded, (int)gCustomModels.size(), path);
+	return loaded;
+}
+
+std::string
+SampCustomModelsJson(void)
+{
+	std::string s = "\"dir\":" + JsonStr(gCustomModelsDir) + ",\"models\":[";
+	for(size_t i = 0; i < gCustomModels.size(); i++){
+		const SampCustomModel &cm = gCustomModels[i];
+		char b[200];
+		snprintf(b, sizeof(b), "%s{\"samp_id\":%d,\"model_id\":%d,\"base_id\":%d,\"world\":%d,\"ok\":%s,\"dff\":",
+			i ? "," : "", cm.sampId, cm.internalId, cm.baseId, cm.world, cm.ok ? "true" : "false");
+		s += b + JsonStr(cm.dff) + ",\"txd\":" + JsonStr(cm.txd);
+		if(!cm.ok) s += ",\"error\":" + JsonStr(cm.error);
+		s += "}";
+	}
+	return s + "]";
 }

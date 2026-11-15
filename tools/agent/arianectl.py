@@ -25,154 +25,15 @@ if __package__:
 	from .service import ArianeService, ScenePatchError, DEFAULT_STATE_DIR
 else:
 	from service import ArianeService, ScenePatchError, DEFAULT_STATE_DIR
+if __package__:
+	from . import mapping_tools, materials, custom_models
+else:
+	import mapping_tools, materials, custom_models
+patch_in_chunks = mapping_tools.patch_in_chunks
 
 
 def emit(payload: object) -> None:
 	print(json.dumps(payload, indent=2, ensure_ascii=False))
-
-
-def patch_in_chunks(service, ops: list[dict], size: int = 400) -> dict:
-	"""Apply many simple operations as a few patches (one bridge round trip each)."""
-	done = 0
-	for i in range(0, len(ops), size):
-		service.apply_scene_patch(ops[i:i + size])
-		done += len(ops[i:i + size])
-	return {"ok": True, "applied": done}
-
-
-def settle_objects(service, client, args) -> dict:
-	"""Dig-in settling for placed objects (stack aware, terrain-only raycasts)."""
-	import math
-	items = [i for i in service.enumerate_scene() if i.get("agent_scene", True)]
-	items = [i for i in items if not str(i.get("name", "")).lower().startswith("lod")]
-	box = [float(v) for v in args.bbox.split(",")] if args.bbox else None
-	want_models = set(args.models or []); want_ids = set(args.ids or [])
-	floor_models = set(getattr(args, "floor_models", []) or [])
-	bounds_cache: dict = {}
-	def bounds(model):
-		if model not in bounds_cache:
-			bounds_cache[model] = service.probe_asset(model, ensure_renderable=True).get("collision_bounds")
-		return bounds_cache[model]
-	render_cache: dict = {}
-	def render_bottom(model):
-		if model not in render_cache:
-			rb = service.probe_asset(model, ensure_renderable=True).get("render_bounds")
-			render_cache[model] = rb[0][2] if rb else None
-		return render_cache[model]
-	profile_cache: dict = {}
-	def visual_gap(base, x, y, z):
-		"""Sink needed so every side's drawn wall bottom meets the terrain (median per side)."""
-		m = base["model_id"]
-		if m not in profile_cache:
-			try:
-				profile_cache[m] = client.command("mesh_profile", m, 16)
-			except Exception:
-				profile_cache[m] = None
-		prof = profile_cache[m]
-		if not prof: return None
-		n = prof["n"]; (mnx, mny, _), (mxx, mxy, _) = prof["bounds"]
-		sx, sy = (mxx - mnx) / n, (mxy - mny) / n
-		h = math.radians(base["rotation"][2]); c, s = math.cos(h), math.sin(h)
-		sides = {"s": [], "n": [], "w": [], "e": []}
-		for r in range(n):
-			for col in range(n):
-				bz = prof["bottom"][r * n + col]
-				if bz is None: continue
-				edge = [k for k, on in (("s", r == 0), ("n", r == n - 1), ("w", col == 0), ("e", col == n - 1)) if on]
-				if not edge: continue
-				lx, ly = mnx + (col + 0.5) * sx, mny + (r + 0.5) * sy
-				wx, wy = x + lx * c - ly * s, y + lx * s + ly * c
-				g = ground(wx, wy, z + bz + 1.0)
-				if g is None: continue
-				for k in edge: sides[k].append(z + bz - g)
-		if getattr(args, "edge_stat", "p25") == "max":
-			meds = [max(v) for v in sides.values() if v]               # every edge on the ground
-		else:
-			meds = [sorted(v)[len(v) // 4] for v in sides.values() if v]   # 25th percentile: wall bottoms, not window gaps / corner footings
-		return max(meds) if meds else None
-	def footprint(it, grow=0.0):
-		b = bounds(it["model_id"])
-		if not b: return None
-		(ax, ay, _), (bx, by, _) = b
-		h = math.radians(it["rotation"][2]); c, s = math.cos(h), math.sin(h)
-		x, y = it["position"][:2]
-		return [(x + lx * c - ly * s, y + lx * s + ly * c)
-		        for lx, ly in ((ax - grow, ay - grow), (bx + grow, ay - grow), (bx + grow, by + grow), (ax - grow, by + grow))]
-	def quad_area(q):
-		return abs(sum(q[i][0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * q[i][1] for i in range(4))) / 2
-	def inside(px, py, quad):
-		sign = None
-		for i in range(4):
-			(x1, y1), (x2, y2) = quad[i], quad[(i + 1) % 4]
-			cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
-			if abs(cross) < 1e-9: continue
-			if sign is None: sign = cross > 0
-			elif (cross > 0) != sign: return False
-		return True
-	# a stack = a base object plus everything resting on it: centre inside its
-	# footprint and higher up (stacked containers, a hut or lamp on a post...)
-	items.sort(key=lambda i: i["position"][2])
-	rider_of: dict = {}
-	stacks: dict = {}
-	for it in items:
-		if it["instance_id"] in rider_of: continue
-		quad = footprint(it, 0.2)
-		group = [it]
-		if quad:
-			bz = it["position"][2]
-			for other in items:
-				if other is it or other["instance_id"] in rider_of: continue
-				oq = footprint(other)
-				if oq and quad_area(oq) > quad_area(quad) * 1.5:
-					continue                         # something bigger can't rest on this (a smoke emitter under a ruin...)
-				if other["position"][2] > bz + 0.5 and inside(other["position"][0], other["position"][1], quad):
-					rider_of[other["instance_id"]] = it["instance_id"]; group.append(other)
-		stacks[it["instance_id"]] = group
-	def ground(x, y, z):
-		for _ in range(10):
-			hit = client.raycast_segment([x, y, z], [x, y, z - 60.0]).get("hit")
-			if not hit: return None
-			if not hit.get("agent_scene") or hit.get("model_id") in floor_models: return hit["point"][2]
-			z = hit["point"][2] - 0.02
-		return None
-	ops, report = [], []
-	for stack in stacks.values():
-		stack.sort(key=lambda i: i["position"][2])
-		base = stack[0]
-		x, y, z = base["position"]
-		if box and not (box[0] <= x <= box[2] and box[1] <= y <= box[3]): continue
-		if want_models and base["model_id"] not in want_models: continue
-		if want_ids and base["instance_id"] not in want_ids: continue
-		b = bounds(base["model_id"])
-		if not b: continue
-		(ax, ay, az), (bx, by, _) = b
-		rb = render_bottom(base["model_id"])
-		if rb is not None and rb > az:
-			az = rb                                  # mesh starts above its collision box: settle the visible bottom
-		ax += 0.3; ay += 0.3; bx -= 0.3; by -= 0.3
-		h = math.radians(base["rotation"][2]); c, s = math.cos(h), math.sin(h)
-		pts = [(x + lx * c - ly * s, y + lx * s + ly * c) for lx, ly in ((ax, ay), (bx, ay), (bx, by), (ax, by), (0, 0))]
-		bottom = z + az
-		gs = [g for g in (ground(px, py, bottom + 1.0) for px, py in pts) if g is not None]
-		if len(gs) < 3:
-			report.append({"instance_id": base["instance_id"], "skipped": "no ground under footprint"}); continue
-		gap = bottom - min(gs)
-		relief = max(gs) - min(gs)
-		if getattr(args, "visual", False):
-			vg = visual_gap(base, x, y, z)
-			if vg is not None:
-				gap = min(vg, args.max_sink)
-		if gap <= args.min_gap: continue
-		for it in stack:
-			ix, iy, iz = it["position"]
-			ops.append({"action": "transform", "instance_id": it["instance_id"], "x": ix, "y": iy,
-			            "z": iz - gap - 0.03, "heading": it["rotation"][2], "snap": False})
-		if gap > 0.5 or relief > 1.5:
-			report.append({"instance_id": base["instance_id"], "name": base.get("name"), "lowered": round(gap, 2),
-			               "relief": round(relief, 2), "position": [round(x, 1), round(y, 1)]})
-	if ops and not args.dry_run:
-		patch_in_chunks(service, ops)
-	return {"ok": True, "transforms": len(ops), "dry_run": args.dry_run, "notes": report}
 
 
 def add_engine_commands(sub: argparse._SubParsersAction) -> None:
@@ -229,6 +90,62 @@ def add_engine_commands(sub: argparse._SubParsersAction) -> None:
 	                         "the ground (mounds, heaps, slabs)")
 	settle.add_argument("--floor-models", type=int, nargs="*", default=[18981, 19543, 19544, 19545],
 	                    help="placed models that count as ground (slabs, ground planes)")
+	mat = sub.add_parser("material", help="SA-MP material overrides: retexture / recolour / text on placed objects")
+	mat_sub = mat.add_subparsers(dest="material_command", required=True)
+	mset = mat_sub.add_parser("set", help="SetDynamicObjectMaterial")
+	mset.add_argument("instance_id", type=int); mset.add_argument("index", type=int)
+	mset.add_argument("model", type=int); mset.add_argument("txd"); mset.add_argument("texture")
+	mset.add_argument("--color", default="0", help="ARGB, e.g. 0xFF6E5A46 (0 = keep)")
+	mpre = mat_sub.add_parser("preset", help="apply a named texture preset (see 'material presets')")
+	mpre.add_argument("instance_id", type=int); mpre.add_argument("index", type=int); mpre.add_argument("preset")
+	mpre.add_argument("--color", default="0")
+	mtext = mat_sub.add_parser("text", help="SetDynamicObjectMaterialText")
+	mtext.add_argument("instance_id", type=int); mtext.add_argument("index", type=int); mtext.add_argument("text")
+	mtext.add_argument("--size", type=int, default=90, help="OBJECT_MATERIAL_SIZE_* value (90 = 256x128)")
+	mtext.add_argument("--font", default="Arial"); mtext.add_argument("--font-size", type=int, default=24)
+	mtext.add_argument("--no-bold", action="store_true"); mtext.add_argument("--font-color", default="0xFFFFFFFF")
+	mtext.add_argument("--back-color", default="0"); mtext.add_argument("--align", type=int, default=1)
+	mclr = mat_sub.add_parser("clear"); mclr.add_argument("instance_id", type=int)
+	mclr.add_argument("--index", type=int, default=-1)
+	mget = mat_sub.add_parser("get"); mget.add_argument("instance_id", type=int)
+	mcopy = mat_sub.add_parser("copy"); mcopy.add_argument("from_id", type=int); mcopy.add_argument("to_ids", type=int, nargs="+")
+	mmodel = mat_sub.add_parser("model", help="a model's material slots, its txd and every texture in that txd")
+	mmodel.add_argument("model", type=int)
+	mtxd = mat_sub.add_parser("txd", help="textures in a txd"); mtxd.add_argument("txd")
+	mat_sub.add_parser("presets", help="list texture presets and whether they resolve in this install")
+	cm = sub.add_parser("custom-models", help="SA-MP custom models (models/artconfig.txt AddSimpleModel)")
+	cm_sub = cm.add_subparsers(dest="custom_command", required=True)
+	cm_sub.add_parser("list", help="registered custom models: samp_id -> model_id to place")
+	cmr = cm_sub.add_parser("reload", help="re-read artconfig.txt"); cmr.add_argument("--dir", help="models folder (default <server>/models)")
+	cma = cm_sub.add_parser("add", help="copy a dff/txd into <server>/models, add an AddSimpleModel line, load it")
+	cma.add_argument("server_dir", type=Path); cma.add_argument("dff", type=Path); cma.add_argument("txd", type=Path)
+	cma.add_argument("--base", type=int, required=True, help="stock model giving collision + flags")
+	cma.add_argument("--id", type=int, help="SA-MP id (default: next free from -1000 down)")
+	cma.add_argument("--world", type=int, default=-1)
+	witems = sub.add_parser("world-items", help="World (native) objects whose origin is inside a rectangle")
+	witems.add_argument("--bbox", required=True, help="x0,y0,x1,y1"); witems.add_argument("--out", type=Path, help="JSONL")
+	wrun = sub.add_parser("wall-run", help="Lay a gap-free wall (stacked containers + fence sections) along a polyline")
+	wrun.add_argument("--points", required=True, help="JSON list [[x,y],...] or a .json file")
+	wrun.add_argument("--open", action="store_true", help="open polyline (default: closed polygon)")
+	wrun.add_argument("--gates", help="JSON list [{x,y,opening}] or a .json file")
+	wrun.add_argument("--containers", type=int, nargs="*", default=[2932, 2934, 2935])
+	wrun.add_argument("--container-levels", type=int, default=2)
+	wrun.add_argument("--fence", type=int, default=19641, help="fence section model (0 = containers only)")
+	wrun.add_argument("--mix", type=float, default=0.65, help="share of container runs")
+	wrun.add_argument("--no-posts", action="store_true"); wrun.add_argument("--seed", type=int, default=1)
+	wrun.add_argument("--dry-run", action="store_true")
+	packp = sub.add_parser("pack", help="Fill a zone with structures on free ground, facing the nearest dirt track")
+	packp.add_argument("--zone", required=True, help="JSON polygon [[x,y],...] or a .json file")
+	packp.add_argument("--models", type=int, nargs="+", required=True)
+	packp.add_argument("--weights", type=float, nargs="*")
+	packp.add_argument("--count", type=int, default=20); packp.add_argument("--gap", type=float, default=1.5)
+	packp.add_argument("--step", type=float, default=2.0); packp.add_argument("--scan", type=Path)
+	packp.add_argument("--align", default="track", help="track | random | heading in degrees")
+	packp.add_argument("--seed", type=int, default=1); packp.add_argument("--dry-run", action="store_true")
+	pmap = sub.add_parser("plan-map", help="Top-down plan PNG: world buildings, placed objects, tracks, lint issues")
+	pmap.add_argument("--bbox", required=True); pmap.add_argument("--out", type=Path, required=True)
+	pmap.add_argument("--scan", type=Path); pmap.add_argument("--issues", type=Path, help="lint --json output")
+	pmap.add_argument("--scale", type=float, default=3.0, help="pixels per metre")
 	gscan = sub.add_parser("ground-scan",
 		help="Map ground height + collision surface (DIRTTRACK, SAND, TARMAC...) over a rectangle")
 	gscan.add_argument("--bbox", required=True, help="x0,y0,x1,y1 (use --bbox=... for negative values)")
@@ -775,6 +692,63 @@ def main(argv: list[str] | None = None) -> int:
 					                         args.cam_z, args.lod_mult, args.delay)
 				else:
 					payload = client.command("samp_sync", args.map or "-", int(args.force))
+		elif args.command == "custom-models":
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			if args.custom_command == "list":
+				payload = custom_models.list_custom_models(service)
+			elif args.custom_command == "reload":
+				payload = custom_models.reload_custom_models(service, args.dir)
+			else:
+				payload = custom_models.add_simple_model(service, args.server_dir, args.dff, args.txd, base_id=args.base,
+				                                         samp_id=args.id, world=args.world)
+		elif args.command == "material":
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			c = args.material_command
+			if c == "set":
+				payload = materials.set_material(service, args.instance_id, args.index, args.model, args.txd, args.texture, args.color)
+			elif c == "preset":
+				payload = materials.set_preset(service, args.instance_id, args.index, args.preset, args.color)
+			elif c == "text":
+				payload = materials.set_material_text(service, args.instance_id, args.index, args.text.replace("\\n", "\n"),
+				                                      size=args.size, font=args.font, font_size=args.font_size,
+				                                      bold=not args.no_bold, font_color=args.font_color,
+				                                      back_color=args.back_color, align=args.align)
+			elif c == "clear":
+				payload = materials.clear_materials(service, args.instance_id, args.index)
+			elif c == "get":
+				payload = materials.get_materials(service, args.instance_id)
+			elif c == "copy":
+				payload = {"ok": True, "copied": [materials.copy_materials(service, args.from_id, t)["instance_id"] for t in args.to_ids]}
+			elif c == "model":
+				payload = materials.model_materials(service, args.model)
+			elif c == "txd":
+				payload = materials.txd_textures(service, args.txd)
+			else:
+				payload = {"ok": True, "presets": materials.TEXTURE_PRESETS, "resolves": materials.check_presets(service)}
+		elif args.command in {"world-items", "wall-run", "pack", "plan-map"}:
+			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
+			def js(v):
+				return json.loads(Path(v).read_text(encoding="utf-8")) if v and v.endswith(".json") else (json.loads(v) if v else None)
+			if args.command == "world-items":
+				box = tuple(float(v) for v in args.bbox.split(","))
+				items = mapping_tools.world_items(service, box)
+				if args.out:
+					args.out.write_text("".join(json.dumps(i) + chr(10) for i in items), encoding="utf-8")
+				payload = {"ok": True, "count": len(items), "out": str(args.out) if args.out else None,
+				           "items": None if args.out else items}
+			elif args.command == "wall-run":
+				payload = mapping_tools.wall_run(service, js(args.points), closed=not args.open, gates=js(args.gates),
+				                                 containers=args.containers, container_levels=args.container_levels,
+				                                 fence=args.fence or None, mix=args.mix, seed=args.seed,
+				                                 gate_posts=not args.no_posts, dry_run=args.dry_run)
+			elif args.command == "pack":
+				payload = mapping_tools.pack(service, js(args.zone), args.models, count=args.count, weights=args.weights,
+				                             gap=args.gap, step=args.step, scan=str(args.scan) if args.scan else None,
+				                             align=args.align, seed=args.seed, dry_run=args.dry_run)
+			else:
+				box = tuple(float(v) for v in args.bbox.split(","))
+				payload = mapping_tools.plan_map(service, box, args.out, scan=str(args.scan) if args.scan else None,
+				                                 issues=str(args.issues) if args.issues else None, scale=args.scale)
 		elif args.command in {"transform-batch", "settle"} or (args.command == "delete" and len(args.instance_id) > 1):
 			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
 			if args.command == "delete":
@@ -789,7 +763,10 @@ def main(argv: list[str] | None = None) -> int:
 					            "snap": len(cols) > 5 and cols[5] not in ("0", "false")})
 				payload = patch_in_chunks(service, ops)
 			else:
-				payload = settle_objects(service, ArianeClient(args.socket, args.timeout), args)
+				payload = mapping_tools.settle(service, ArianeClient(args.socket, args.timeout), bbox=args.bbox,
+				                               models=args.models, ids=args.ids, min_gap=args.min_gap, dry_run=args.dry_run,
+				                               visual=args.visual, max_sink=args.max_sink, edge_stat=args.edge_stat,
+				                               floor_models=args.floor_models)
 		elif args.command in {"place", "transform", "transform3d", "delete", "clear", "suppress-world-models"}:
 			service = ArianeService(args.socket, args.db, args.timeout, args.discovery_dir, args.state_dir)
 			if args.command == "clear": payload = service.engine("clear")
